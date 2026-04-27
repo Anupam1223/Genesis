@@ -1,0 +1,29 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual Environments
+venv/
+env/
+.env/
+.venv/
+
+# Proprietary Data (NEVER commit SCADA data to GitHub!)
+data/raw/*
+data/processed/*
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+
+# Local Artifacts & Outputs
+outputs/
+wandb/
+*.pt
+*.pth
+*.onnx
+
+# IDEs and OS files
+.idea/
+.vscode/
+.DS_Store
+*.swp

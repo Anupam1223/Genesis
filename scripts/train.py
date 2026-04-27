@@ -1,0 +1,58 @@
+import os
+import sys
+import torch
+from torch.utils.data import DataLoader
+import wandb
+
+# Add the root directory to path so python can find the 'src' folder
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
+from src.data.dataset import SCADAPipelineDataset
+from src.models.flow_model import PipelineConditionalFlow
+from src.training.trainer import SMPCTrainer
+
+def main():
+    # --- CONFIGURATION ---
+    DATA_PATH = "data/raw/dummy_scada.csv"
+    BATCH_SIZE = 256
+    EPOCHS = 30
+    LEARNING_RATE = 1e-3
+    LOG_WANDB = False
+    
+    # Enable Apple Silicon Acceleration natively
+    device = "mps" if torch.backends.mps.is_available() else "cpu"
+
+    if LOG_WANDB:
+        wandb.init(project="smpc-flow", config={"epochs": EPOCHS, "batch_size": BATCH_SIZE, "lr": LEARNING_RATE})
+
+    # 1. Load the Dataset into M4 Max Unified Memory
+    print("Initializing Dataset...")
+    dataset = SCADAPipelineDataset(data_path=DATA_PATH, is_training=True, log_to_wandb=LOG_WANDB)
+    dataloader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=True)
+
+    # 2. Dynamically size the Neural Network based on the data
+    sample = dataset[0]
+    dim_theta = sample['theta'].shape[0]
+    dim_condition = sample['condition'].shape[0]
+
+    # 3. Build the Normalizing Flow
+    print(f"Building Flow (Theta Dim: {dim_theta}, Cond Dim: {dim_condition})...")
+    model = PipelineConditionalFlow(dim_theta=dim_theta, dim_condition=dim_condition, num_layers=6)
+
+    # 4. Ignite the Training Loop
+    trainer = SMPCTrainer(
+        model=model, 
+        dataloader=dataloader, 
+        learning_rate=LEARNING_RATE, 
+        epochs=EPOCHS, 
+        device=device,
+        log_to_wandb=LOG_WANDB
+    )
+    
+    trainer.train()
+    
+    if LOG_WANDB:
+        wandb.finish()
+
+if __name__ == "__main__":
+    main()
