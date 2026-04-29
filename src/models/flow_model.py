@@ -44,9 +44,9 @@ class PipelineConditionalFlow(nn.Module):
             total_log_det += log_det
             
             # [SLIDE 38, STEP 3: THE SWAP]
-            # Swap Half A and Half B by rolling the tensor elements
-            # so the next layer warps the OTHER half.
-            z = torch.roll(z, shifts=self.dim_theta // 2, dims=-1)
+            # Match the diagram perfectly: Flip the tensor array entirely 
+            # so the 4 variables in Half B become the new Half A!
+            z = torch.flip(z, dims=[-1])
             
         return z, total_log_det
 
@@ -79,8 +79,8 @@ class PipelineConditionalFlow(nn.Module):
         
         # Run the relay race BACKWARD through the layers
         for layer in reversed(self.layers):
-            # Undo the swap first!
-            z = torch.roll(z, shifts=-(self.dim_theta // 2), dims=-1)
+            # Undo the flip first!
+            z = torch.flip(z, dims=[-1])
             # Run the inverse math
             z = layer.inverse(z, condition)
             

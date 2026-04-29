@@ -11,25 +11,32 @@ class SCADAPipelineDataset(Dataset):
     In-Memory PyTorch Dataset for Emerson SCADA Pipeline Data.
     Optimized for high-RAM Apple Silicon (M4 Max 128GB).
     """
-    def __init__(self, data_path: str, is_training: bool = True, log_to_wandb: bool = False, output_dir: str = "outputs/images"):
+    def __init__(self, data_path: str, split: str = 'train', log_to_wandb: bool = False, output_dir: str = "outputs"):
         super().__init__()
-        self.is_training = is_training
+        self.split = split
         self.log_to_wandb = log_to_wandb
-        self.output_dir = output_dir
+        self.image_dir = os.path.join(output_dir, "images")
+        self.scaler_path = os.path.join(output_dir, "checkpoints", "scaler.pt")
         
         # 1. LOAD DATA TO RAM
-        # With 128GB of Unified Memory, we load the entire SCADA dataset into Pandas instantly.
-        print(f"Loading actual data from {data_path} into M4 Max Unified Memory...")
-        raw_df = pd.read_csv(data_path) # Switch to pd.read_parquet() for large prod files
+        print(f"Loading actual data from {data_path} into M4 Max Unified Memory (Split: {split.upper()})...")
+        raw_df = pd.read_csv(data_path) 
         
-        # --- NEW: CLEAN COLUMN NAMES AUTOMATICALLY ---
-        # 1. str.strip() removes hidden spaces at the beginning or end of the name
-        # 2. str.replace() replaces spaces in the middle with underscores
+        # Clean column names (strip hidden spaces, replace internal spaces with underscores)
         raw_df.columns = raw_df.columns.str.strip().str.replace(r'\s+', '_', regex=True)
         
-        # 2. SEPARATE THE 3 PARTITIONS
-        # Now we can use the clean, bug-free underscore versions!
+        # 2. CHRONOLOGICAL SPLIT (80% Train / 20% Val)
+        split_idx = int(len(raw_df) * 0.8)
+        if self.split == 'train':
+            df = raw_df.iloc[:split_idx].copy()
+        elif self.split == 'val':
+            df = raw_df.iloc[split_idx:].copy()
+        else:
+            raise ValueError("Split must be 'train' or 'val'")
+            
+        print(f"Loaded {len(df)} rows for {self.split.upper()}.")
         
+        # 3. SEPARATE THE 3 PARTITIONS
         # x: Measured Now (100% Certain Context)
         self.x_cols = [
             'COMP_Suction_Pressure', 
@@ -52,30 +59,47 @@ class SCADAPipelineDataset(Dataset):
             'KPI_Gas_COMP_Isentropic_Efficiency', 
             'COMP_Discharge_Pressure', 
             'COMP_Discharge_Temp', 
-            'Exhaust_Temp_Spread_1'
+            'Exhaust_Temp_Spread_1',
+            'KPI_Turbine_Heat_Rate'
         ]
         
-        # 3. PREPROCESSING & TRACKING
-        self._process_and_track(raw_df)
+        # 4. PREPROCESSING & TRACKING
+        self._process_and_track(df)
 
     def _process_and_track(self, df: pd.DataFrame):
         """
         Handles scaling/standardization and triggers the visual tracker.
         """
-        # A. Store RAW arrays for visualization before we alter them
+        # A. Store RAW arrays
         raw_theta = df[self.theta_cols].values
         raw_x = df[self.x_cols].values
         raw_u = df[self.u_cols].values
 
-        # B. Apply Standard Scaling (Z-Score Normalization)
-        # Note: In production, load a saved StandardScaler fit on the training set
-        # to ensure the validation/test data is scaled identically.
-        self.x_data = (raw_x - np.mean(raw_x, axis=0)) / (np.std(raw_x, axis=0) + 1e-8)
-        self.u_data = (raw_u - np.mean(raw_u, axis=0)) / (np.std(raw_u, axis=0) + 1e-8)
-        self.theta_data = (raw_theta - np.mean(raw_theta, axis=0)) / (np.std(raw_theta, axis=0) + 1e-8)
+        # B. Apply Standard Scaling (Z-Score Normalization) WITHOUT DATA LEAKAGE
+        if self.split == 'train':
+            # Calculate the math ONLY on training data
+            self.scaler_stats = {
+                'x_mean': np.mean(raw_x, axis=0), 'x_std': np.std(raw_x, axis=0) + 1e-8,
+                'u_mean': np.mean(raw_u, axis=0), 'u_std': np.std(raw_u, axis=0) + 1e-8,
+                'theta_mean': np.mean(raw_theta, axis=0), 'theta_std': np.std(raw_theta, axis=0) + 1e-8
+            }
+            # Save the math to disk so Edge devices and Validation loops can use it!
+            os.makedirs(os.path.dirname(self.scaler_path), exist_ok=True)
+            torch.save(self.scaler_stats, self.scaler_path)
+            print(f"💾 Scaler state saved to {self.scaler_path}")
+        else:
+            # If we are Validation (or Inference), load the math calculated by the training phase!
+            if not os.path.exists(self.scaler_path):
+                raise FileNotFoundError(f"Scaler not found at {self.scaler_path}. Run training first!")
+            self.scaler_stats = torch.load(self.scaler_path)
+            print("🔄 Loaded existing scaler state.")
+
+        # Actually apply the scaling math
+        self.x_data = (raw_x - self.scaler_stats['x_mean']) / self.scaler_stats['x_std']
+        self.u_data = (raw_u - self.scaler_stats['u_mean']) / self.scaler_stats['u_std']
+        self.theta_data = (raw_theta - self.scaler_stats['theta_mean']) / self.scaler_stats['theta_std']
 
         # C. Convert to PyTorch Tensors (Stored in CPU RAM)
-        # float32 is optimal for Apple Metal Performance Shaders (MPS) acceleration
         self.x_tensor = torch.tensor(self.x_data, dtype=torch.float32)
         self.u_tensor = torch.tensor(self.u_data, dtype=torch.float32)
         self.theta_tensor = torch.tensor(self.theta_data, dtype=torch.float32)
@@ -83,26 +107,19 @@ class SCADAPipelineDataset(Dataset):
         # D. Combine conditions into a single tensor for the "Brain" (MLP)
         self.condition_tensor = torch.cat([self.x_tensor, self.u_tensor], dim=-1)
 
-        # E. VISUAL TRACKING
-        # Save a picture of the transformation to local disk (and wandb if enabled)
-        if self.is_training:
+        # E. VISUAL TRACKING (Only generate plots during training phase to save time)
+        if self.split == 'train':
             self._log_data_transformations(raw_theta, self.theta_data)
 
     def _log_data_transformations(self, raw_data, scaled_data):
-        """
-        Generates plots comparing raw vs. processed data.
-        Saves them locally to outputs/images and optionally uploads to W&B.
-        """
         fig, axes = plt.subplots(1, 2, figsize=(14, 5))
         
-        # Plot 1: Raw Data 
         axes[0].plot(raw_data[:200, 0], color='#ef4444', linewidth=1.5)
         axes[0].set_title("Raw SCADA Data (Before)", fontweight="bold")
         axes[0].set_ylabel("Original Units")
         axes[0].set_xlabel("Timesteps")
         axes[0].grid(True, linestyle='--', alpha=0.6)
         
-        # Plot 2: Scaled Data (Prepared for the Normalizing Flow)
         axes[1].plot(scaled_data[:200, 0], color='#3b82f6', linewidth=1.5)
         axes[1].set_title("Standardized Data (After)", fontweight="bold")
         axes[1].set_ylabel("Z-Score (Mean=0, Std=1)")
@@ -111,16 +128,12 @@ class SCADAPipelineDataset(Dataset):
         
         plt.tight_layout()
         
-        # 1. Save Locally
-        os.makedirs(self.output_dir, exist_ok=True)
-        local_path = os.path.join(self.output_dir, "data_transformation_step.png")
+        os.makedirs(self.image_dir, exist_ok=True)
+        local_path = os.path.join(self.image_dir, "data_transformation_step.png")
         plt.savefig(local_path, dpi=300, bbox_inches='tight')
-        print(f"📊 Local transformation image saved to: {local_path}")
         
-        # 2. Upload to Cloud (W&B)
         if self.log_to_wandb:
             wandb.log({"Data_Transform_Visual": wandb.Image(fig)})
-            print("☁️ Data transformation visualizations synced to Weights & Biases!")
             
         plt.close(fig)
 
@@ -128,9 +141,6 @@ class SCADAPipelineDataset(Dataset):
         return len(self.theta_tensor)
 
     def __getitem__(self, idx):
-        """
-        Data is entirely pre-cached in RAM. Fetching takes ~0ms.
-        """
         return {
             "theta": self.theta_tensor[idx],
             "condition": self.condition_tensor[idx]

@@ -5,10 +5,11 @@ from tqdm import tqdm
 import wandb
 
 class SMPCTrainer:
-    def __init__(self, model, dataloader, learning_rate=1e-3, epochs=50, device="mps", log_to_wandb=False):
+    def __init__(self, model, train_dataloader, val_dataloader, learning_rate=1e-3, epochs=50, device="mps", log_to_wandb=False):
         # Move the model to the Apple Metal GPU
         self.model = model.to(device)
-        self.dataloader = dataloader
+        self.train_dataloader = train_dataloader
+        self.val_dataloader = val_dataloader
         self.epochs = epochs
         self.device = device
         self.log_to_wandb = log_to_wandb
@@ -19,54 +20,88 @@ class SMPCTrainer:
         # Setup local checkpoint directory
         self.checkpoint_dir = "outputs/checkpoints"
         os.makedirs(self.checkpoint_dir, exist_ok=True)
+        
+        # Track the best validation loss to save the best model
+        self.best_val_loss = float('inf')
 
     def train(self):
         print(f"\n🚀 Starting training on device: {self.device.upper()}")
-        self.model.train()
         
         for epoch in range(1, self.epochs + 1):
-            epoch_loss = 0.0
+            # --- TRAINING PHASE ---
+            self.model.train()
+            epoch_train_loss = 0.0
             
-            # Progress bar for the batch loop
-            pbar = tqdm(self.dataloader, desc=f"Epoch {epoch:03d}/{self.epochs}")
+            # Progress bar for the train batch loop
+            pbar_train = tqdm(self.train_dataloader, desc=f"Epoch {epoch:03d}/{self.epochs} [TRAIN]")
             
-            for batch in pbar:
-                # Move data to Apple Metal GPU
+            for batch in pbar_train:
                 theta = batch['theta'].to(self.device)
                 condition = batch['condition'].to(self.device)
                 
-                # 1. Zero out old gradients
                 self.optimizer.zero_grad()
-                
-                # 2. Forward Pass & Loss Calculation (from your wrapper!)
                 loss = self.model.compute_loss(theta, condition)
-                
-                # 3. Backward Pass (Calculate the physics gradients)
                 loss.backward()
-                
-                # 4. Update the neural network weights
                 self.optimizer.step()
                 
-                epoch_loss += loss.item()
-                pbar.set_postfix({"loss": f"{loss.item():.4f}"})
+                epoch_train_loss += loss.item()
+                pbar_train.set_postfix({"loss": f"{loss.item():.4f}"})
             
-            # End of epoch tracking
-            avg_loss = epoch_loss / len(self.dataloader)
+            avg_train_loss = epoch_train_loss / len(self.train_dataloader)
             
+            # --- VALIDATION PHASE ---
+            avg_val_loss = self.evaluate(epoch)
+            
+            # --- LOGGING & SAVING ---
             if self.log_to_wandb:
-                wandb.log({"epoch": epoch, "loss": avg_loss})
+                wandb.log({
+                    "epoch": epoch, 
+                    "train_loss": avg_train_loss,
+                    "val_loss": avg_val_loss
+                })
                 
-            # Save local checkpoint every 10 epochs
-            if epoch % 10 == 0:
-                self.save_checkpoint(epoch, avg_loss)
+            # Save the "Best" model based on unseen validation data
+            if avg_val_loss < self.best_val_loss:
+                self.best_val_loss = avg_val_loss
+                self.save_checkpoint(epoch, avg_train_loss, avg_val_loss, is_best=True)
+                print(f"   🌟 New best model saved! (Val Loss: {avg_val_loss:.4f})")
+                
+            # Save regular checkpoint every 10 epochs
+            elif epoch % 10 == 0:
+                self.save_checkpoint(epoch, avg_train_loss, avg_val_loss)
                 
         print("\n✅ Training Complete!")
 
-    def save_checkpoint(self, epoch, loss):
-        path = os.path.join(self.checkpoint_dir, f"model_epoch_{epoch}.pt")
+    def evaluate(self, epoch):
+        """
+        Runs the model on unseen data without updating weights.
+        """
+        self.model.eval() # Turn off training features like Dropout
+        epoch_val_loss = 0.0
+        
+        pbar_val = tqdm(self.val_dataloader, desc=f"Epoch {epoch:03d}/{self.epochs} [VAL]  ", leave=False)
+        
+        with torch.no_grad(): # Disable physics gradient tracking to save memory/speed
+            for batch in pbar_val:
+                theta = batch['theta'].to(self.device)
+                condition = batch['condition'].to(self.device)
+                
+                loss = self.model.compute_loss(theta, condition)
+                epoch_val_loss += loss.item()
+                pbar_val.set_postfix({"val_loss": f"{loss.item():.4f}"})
+                
+        avg_val_loss = epoch_val_loss / len(self.val_dataloader)
+        print(f"   ↳ Train Loss: {avg_val_loss:.4f} | Val Loss: {avg_val_loss:.4f}")
+        
+        return avg_val_loss
+
+    def save_checkpoint(self, epoch, train_loss, val_loss, is_best=False):
+        filename = "model_best.pt" if is_best else f"model_epoch_{epoch}.pt"
+        path = os.path.join(self.checkpoint_dir, filename)
         torch.save({
             'epoch': epoch,
             'model_state_dict': self.model.state_dict(),
             'optimizer_state_dict': self.optimizer.state_dict(),
-            'loss': loss,
+            'train_loss': train_loss,
+            'val_loss': val_loss,
         }, path)
