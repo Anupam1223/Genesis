@@ -22,21 +22,34 @@ class SCADAPipelineDataset(Dataset):
         print(f"Loading actual data from {data_path} into M4 Max Unified Memory...")
         raw_df = pd.read_csv(data_path) # Switch to pd.read_parquet() for large prod files
         
+        # --- NEW: CLEAN COLUMN NAMES AUTOMATICALLY ---
+        # 1. str.strip() removes hidden spaces at the beginning or end of the name
+        # 2. str.replace() replaces spaces in the middle with underscores
+        raw_df.columns = raw_df.columns.str.strip().str.replace(r'\s+', '_', regex=True)
+        
         # 2. SEPARATE THE 3 PARTITIONS
-        # We explicitly separate the columns based on our Conditional Flow architecture.
+        # Now we can use the clean, bug-free underscore versions!
         
         # x: Measured Now (100% Certain Context)
-        self.x_cols = ['Ambient_Temp_1', 'COMP_Suction_Pressure', 'COMP_Suction_Drum_Temperature', 'KPI_Fuel_Gas_LHV']
+        self.x_cols = [
+            'COMP_Suction_Pressure', 
+            'COMP_Suction_Drum_Temperature', 
+            'KPI_Fuel_Gas_Lower_Heating_Value'
+        ]
         
         # u: Controls (Operator Dials)
-        self.u_cols = ['Turbine_SHAFT_SPEED', 'UK_14PDCV_504', 'SEAL_GAS_SUP_DE']
+        self.u_cols = [
+            'Turbine_SHAFT_SPEED', 
+            'UK_14PDCV-504_H-SEL', 
+            'SEAL_GAS_SUP_DE'
+        ]
         
         # theta: Uncertain Future (The variables we want to simulate/warp)
         self.theta_cols = [
             'SEAL_GAS_FLTR_DP', 
-            'LUBE_OIL_LVL', 
-            'KPI_Turbine_Thermal_Eff', 
-            'KPI_Gas_COMP_Isentropic_Eff', 
+            'LUBE_OIL_LVL_XMTR_HI/LO_TNK', 
+            'KPI_Turbine_Overall_Thermal_Cycle_Efficiency', 
+            'KPI_Gas_COMP_Isentropic_Efficiency', 
             'COMP_Discharge_Pressure', 
             'COMP_Discharge_Temp', 
             'Exhaust_Temp_Spread_1'
