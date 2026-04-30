@@ -20,7 +20,7 @@ class SCADAPipelineDataset(Dataset):
         
         # 1. LOAD DATA TO RAM
         print(f"Loading actual data from {data_path} into M4 Max Unified Memory (Split: {split.upper()})...")
-        raw_df = pd.read_csv(data_path) 
+        raw_df = pd.read_excel(data_path) 
         
         # Clean column names (strip hidden spaces, replace internal spaces with underscores)
         raw_df.columns = raw_df.columns.str.strip().str.replace(r'\s+', '_', regex=True)

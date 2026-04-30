@@ -13,7 +13,7 @@ from src.training.trainer import SMPCTrainer
 
 def main():
     # --- CONFIGURATION ---
-    DATA_PATH = "data/raw/dummy_scada.csv" # TODO: Update to actual Emerson CSV
+    DATA_PATH = "data/raw/DataAllParts.xlsx" # TODO: Update to actual Emerson CSV
     BATCH_SIZE = 256
     EPOCHS = 30
     LEARNING_RATE = 1e-3
