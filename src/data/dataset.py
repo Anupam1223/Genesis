@@ -18,13 +18,24 @@ class SCADAPipelineDataset(Dataset):
         self.image_dir = os.path.join(output_dir, "images")
         self.scaler_path = os.path.join(output_dir, "checkpoints", "scaler.pt")
         
-        # 1. LOAD DATA TO RAM
-        print(f"Loading actual data from {data_path} into M4 Max Unified Memory (Split: {split.upper()})...")
-        raw_df = pd.read_excel(data_path) 
+        # 1. LOAD DATA TO RAM (WITH PARQUET CACHING FOR SPEED)
+        # Automatically determine the cache file name
+        cache_path = data_path.replace('.xlsx', '.parquet').replace('.xls', '.parquet')
         
-        # Clean column names (strip hidden spaces, replace internal spaces with underscores)
-        raw_df.columns = raw_df.columns.str.strip().str.replace(r'\s+', '_', regex=True)
-        
+        if os.path.exists(cache_path):
+            print(f"⚡ FAST LOAD: Reading from cached Parquet file {cache_path} (Split: {split.upper()})...")
+            raw_df = pd.read_parquet(cache_path)
+        else:
+            print(f"🐌 SLOW LOAD: Reading Excel from {data_path}. This will take a minute...")
+            raw_df = pd.read_excel(data_path) 
+            
+            # Clean column names (strip hidden spaces, replace internal spaces with underscores)
+            raw_df.columns = raw_df.columns.str.strip().str.replace(r'\s+', '_', regex=True)
+            
+            # Save the clean dataframe to a fast binary format for next time
+            print(f"💾 Caching to {cache_path} for instant loading next time...")
+            raw_df.to_parquet(cache_path, index=False)
+            
         # 2. CHRONOLOGICAL SPLIT (80% Train / 20% Val)
         split_idx = int(len(raw_df) * 0.8)
         if self.split == 'train':
@@ -70,10 +81,14 @@ class SCADAPipelineDataset(Dataset):
         """
         Handles scaling/standardization and triggers the visual tracker.
         """
-        # A. Store RAW arrays
-        raw_theta = df[self.theta_cols].values
-        raw_x = df[self.x_cols].values
-        raw_u = df[self.u_cols].values
+        # A. Store RAW arrays (Forcing numeric types to prevent np.std crashes)
+        # 1. apply(pd.to_numeric) turns text like "Offline" into NaN
+        # 2. ffill() copies the last known good sensor value forward
+        # 3. bfill() catches any NaNs at the very beginning of the dataset
+        # 4. fillna(0.0) is the absolute final fallback
+        raw_theta = df[self.theta_cols].apply(pd.to_numeric, errors='coerce').ffill().bfill().fillna(0.0).values
+        raw_x = df[self.x_cols].apply(pd.to_numeric, errors='coerce').ffill().bfill().fillna(0.0).values
+        raw_u = df[self.u_cols].apply(pd.to_numeric, errors='coerce').ffill().bfill().fillna(0.0).values
 
         # B. Apply Standard Scaling (Z-Score Normalization) WITHOUT DATA LEAKAGE
         if self.split == 'train':
@@ -92,7 +107,7 @@ class SCADAPipelineDataset(Dataset):
             if not os.path.exists(self.scaler_path):
                 raise FileNotFoundError(f"Scaler not found at {self.scaler_path}. Run training first!")
             self.scaler_stats = torch.load(self.scaler_path)
-            print("🔄 Loaded existing scaler state.")
+            print(f"🔄 Loaded existing scaler state from {self.scaler_path}")
 
         # Actually apply the scaling math
         self.x_data = (raw_x - self.scaler_stats['x_mean']) / self.scaler_stats['x_std']
