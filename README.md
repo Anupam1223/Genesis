@@ -1,70 +1,87 @@
-# Genesis
-# Stochastic MPC with Normalizing Flows (S-MPC)
+# 🧬 Genesis: Physics-Informed Stochastic MPC with Normalizing Flows
 
-This repository contains an edge-deployable, physics-informed Normalizing Flow architecture designed to simulate and optimize complex pipeline dynamics using Emerson SCADA data.
+Genesis is a sophisticated machine learning project designed for **Stochastic Model Predictive Control (S-MPC)**. It uses **Conditional Normalizing Flows** to model the uncertain dynamics of complex industrial systems (like Emerson SCADA pipelines).
 
-The system is highly optimized for in-memory training on **Apple Silicon (M4 Max/Ultra)** using PyTorch Metal Performance Shaders (MPS), leveraging massive unified memory for instant data-loading without lazy-fetching bottlenecks.
+Unlike standard regression models that predict a single value, Genesis models the entire **probability distribution** of future states. This allows operators to not only see what is *likely* to happen but also the *risk* (variance) associated with those predictions.
 
-## 🚀 Quick Start: Environment Setup
+### 🏗 Architecture Overview
+- **Core Model:** A Conditional RealNVP (Affine Coupling) architecture.
+- **Physics-Informed:** Designed to ingest sensor context ($x$) and control inputs ($u$) to warp a simple Gaussian distribution into a complex "Physical State" distribution ($\theta$).
+- **Hardware Optimized:** Built specifically for **Apple Silicon (M4 Max/Ultra)** using PyTorch `mps` (Metal Performance Shaders) for blazing-fast in-memory processing.
 
-We strongly recommend using a virtual environment to prevent dependency conflicts across your machine learning projects.
+---
 
-### 1. Create a Virtual Environment
+## 🛠 Setup & Installation
 
-Open your terminal at the root of this project and run the following commands:
+Follow these steps to get your environment ready for training and inference.
+
+### 1. Environment Initialization
+We use a dedicated virtual environment to handle specific dependency versions for Apple Silicon.
 
 ```bash
-# Create a virtual environment named 'venv'
+# Create and activate environment
 python3 -m venv venv
-
-# Activate the virtual environment (macOS/Linux)
 source venv/bin/activate
-```
 
-*(You will know it is activated when you see `(venv)` at the start of your terminal prompt).*
-
-### 2. Install Dependencies
-
-With the virtual environment activated, upgrade `pip` and install the required packages. The `requirements.txt` is already optimized for Apple Silicon natively.
-
-```bash
+# Upgrade pip and install requirements
 pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
-### 3. Log in to Weights & Biases (Optional but Recommended)
-
-To enable cloud dashboard tracking for your data transformations, pipeline plots, and training loss:
+### 2. Weights & Biases (W&B) Dashboard
+Genesis is deeply integrated with W&B for real-time training visualization, gradient tracking, and hardware monitoring.
 
 ```bash
 wandb login
 ```
 
-## 📂 Project Structure
+---
 
-```text
-smpc-flow-project/
-├── configs/            # Hydra YAML configuration files (Hyperparameters, Paths)
-├── data/               # Local SCADA data (ignored by git to protect proprietary info)
-│   ├── raw/            # Raw Emerson SCADA exports
-│   └── processed/      # Compressed functional PCA data
-├── outputs/            # Local checkpoints, plots, and tensor logs
-│   └── images/         # Transformed data charts and loss graphs
-├── src/                # Core Python modules
-│   ├── data/           # Data loaders and preprocessing (dataset.py)
-│   ├── models/         # Coupling layers, ResidualMLP, and flow wrappers
-│   └── training/       # Training loops and optimizers
-├── scripts/            # Entry points for running the code
-└── tests/              # Unit tests for ensuring gradient stability
+## 📊 Data Preparation (Crucial)
+
+Before running the project, you **must** configure exactly which sensors and control variables you want to track.
+
+### 📍 Setting your Dataset Path
+Open `scripts/train.py` and update the `DATA_PATH` variable to point to your local Excel or Parquet file:
+```python
+# scripts/train.py
+DATA_PATH = "data/raw/Your_Custom_Export.xlsx" 
 ```
 
-## 🧪 Testing the Data Pipeline
+### 🧠 Feature Selection
+The "Brain" of the model depends on which columns you choose. Open `src/data/dataset.py` and modify these three lists to match your specific SCADA export:
 
-To verify your M4 Max environment is set up correctly and your unified memory is ingesting the tensors, you can run the standalone Dataset script. This will generate a dummy SCADA wave, preprocess it, and save a high-res visualization directly to `outputs/images/`.
+1.  **`self.x_cols` (Context):** Measured values you cannot control (Suction Pressure, Ambient Temp).
+2.  **`self.u_cols` (Controls):** Variables you *can* change (Shaft Speed, Valve Positions).
+3.  **`self.theta_cols` (Targets):** The variables you want the AI to predict/simulate the uncertainty for (Discharge Pressure, Thermal Efficiency).
+
+---
+
+## 🚀 Running the Project
+
+### Step 1: Verify the Data Pipeline
+Run the dataset script standalone to ensure your columns are being read correctly and that the scaling math is working. This will generate a visualization in `outputs/images/`.
 
 ```bash
-# Make sure your virtual environment is activated
 python src/data/dataset.py
 ```
 
-Navigate to the `outputs/images/` directory to see the resulting `data_transformation_step.png` chart, confirming that your math transformations and local artifact storage are working perfectly!
+### Step 2: Start Training
+Execute the main training script. This will:
+- Initialize the Normalizing Flow.
+- Start the Apple Silicon GPU-accelerated training loop.
+- Log granular batch-level results to your Weights & Biases dashboard.
+
+```bash
+python scripts/train.py
+```
+
+---
+
+## 📂 Project Structure
+
+- `src/models/`: Contains the `PipelineConditionalFlow` and Coupling layers.
+- `src/training/`: The `SMPCTrainer` which handles the log-likelihood loss and gradient clipping.
+- `src/data/`: Pipeline for scaling, cleaning, and caching SCADA data.
+- `outputs/checkpoints/`: Where your trained `.pt` models and scalers are saved.
+- `scripts/`: Entry points for training and edge-export.
