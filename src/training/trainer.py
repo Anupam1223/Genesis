@@ -27,6 +27,11 @@ class SMPCTrainer:
     def train(self):
         print(f"\n🚀 Starting training on device: {self.device.upper()}")
         
+        if self.log_to_wandb:
+            wandb.watch(self.model, log="all", log_freq=10)
+            
+        global_step = 0
+            
         for epoch in range(1, self.epochs + 1):
             # --- TRAINING PHASE ---
             self.model.train()
@@ -34,7 +39,6 @@ class SMPCTrainer:
             
             # Progress bar for the train batch loop
             pbar_train = tqdm(self.train_dataloader, desc=f"Epoch {epoch:03d}/{self.epochs} [TRAIN]")
-            
             for batch in pbar_train:
                 theta = batch['theta'].to(self.device)
                 condition = batch['condition'].to(self.device)
@@ -47,11 +51,19 @@ class SMPCTrainer:
                 # This prevents the "Loss Spikes" we saw in your logs. 
                 # It caps the gradients so the model doesn't over-react to SCADA anomalies.
                 torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
-                
                 self.optimizer.step()
                 
                 epoch_train_loss += loss.item()
                 pbar_train.set_postfix({"loss": f"{loss.item():.4f}"})
+                
+                # Log metrics per batch for granular visualization
+                if self.log_to_wandb:
+                    wandb.log({
+                        "train/batch_loss": loss.item(),
+                        "epoch": epoch
+                    }, step=global_step)
+                
+                global_step += 1
             
             avg_train_loss = epoch_train_loss / len(self.train_dataloader)
             
@@ -63,9 +75,9 @@ class SMPCTrainer:
             if self.log_to_wandb:
                 wandb.log({
                     "epoch": epoch, 
-                    "train_loss": avg_train_loss,
-                    "val_loss": avg_val_loss
-                })
+                    "train/epoch_loss": avg_train_loss,
+                    "val/epoch_loss": avg_val_loss
+                }, step=global_step)
                 
             # Save the "Best" model based on unseen validation data
             if avg_val_loss < self.best_val_loss:

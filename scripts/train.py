@@ -17,7 +17,7 @@ def main():
     BATCH_SIZE = 256
     EPOCHS = 30
     LEARNING_RATE = 1e-3
-    LOG_WANDB = False
+    LOG_WANDB = True
     
     # Enable Apple Silicon Acceleration natively
     device = "mps" if torch.backends.mps.is_available() else "cpu"
