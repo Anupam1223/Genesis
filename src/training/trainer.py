@@ -42,6 +42,12 @@ class SMPCTrainer:
                 self.optimizer.zero_grad()
                 loss = self.model.compute_loss(theta, condition)
                 loss.backward()
+
+                # --- FIX: GRADIENT CLIPPING ---
+                # This prevents the "Loss Spikes" we saw in your logs. 
+                # It caps the gradients so the model doesn't over-react to SCADA anomalies.
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
+                
                 self.optimizer.step()
                 
                 epoch_train_loss += loss.item()
@@ -50,7 +56,8 @@ class SMPCTrainer:
             avg_train_loss = epoch_train_loss / len(self.train_dataloader)
             
             # --- VALIDATION PHASE ---
-            avg_val_loss = self.evaluate(epoch)
+            # Pass the train loss in so we can print it accurately
+            avg_val_loss = self.evaluate(epoch, avg_train_loss)
             
             # --- LOGGING & SAVING ---
             if self.log_to_wandb:
@@ -72,7 +79,7 @@ class SMPCTrainer:
                 
         print("\n✅ Training Complete!")
 
-    def evaluate(self, epoch):
+    def evaluate(self, epoch, avg_train_loss):
         """
         Runs the model on unseen data without updating weights.
         """
@@ -91,7 +98,10 @@ class SMPCTrainer:
                 pbar_val.set_postfix({"val_loss": f"{loss.item():.4f}"})
                 
         avg_val_loss = epoch_val_loss / len(self.val_dataloader)
-        print(f"   ↳ Train Loss: {avg_val_loss:.4f} | Val Loss: {avg_val_loss:.4f}")
+        
+        # --- FIX: PRINT BUG ---
+        # Now correctly shows the difference between Train and Val performance
+        print(f"   ↳ Train Loss: {avg_train_loss:.4f} | Val Loss: {avg_val_loss:.4f}")
         
         return avg_val_loss
 

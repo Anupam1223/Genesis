@@ -1,4 +1,5 @@
 import os
+import re
 import torch
 from torch.utils.data import Dataset
 import pandas as pd
@@ -18,36 +19,9 @@ class SCADAPipelineDataset(Dataset):
         self.image_dir = os.path.join(output_dir, "images")
         self.scaler_path = os.path.join(output_dir, "checkpoints", "scaler.pt")
         
-        # 1. LOAD DATA TO RAM (WITH PARQUET CACHING FOR SPEED)
-        # Automatically determine the cache file name
-        cache_path = data_path.replace('.xlsx', '.parquet').replace('.xls', '.parquet')
+        # 1. DEFINE REQUIRED COLUMNS FIRST
+        # We define these before loading so we can selectively read ONLY these from the Excel file
         
-        if os.path.exists(cache_path):
-            print(f"⚡ FAST LOAD: Reading from cached Parquet file {cache_path} (Split: {split.upper()})...")
-            raw_df = pd.read_parquet(cache_path)
-        else:
-            print(f"🐌 SLOW LOAD: Reading Excel from {data_path}. This will take a minute...")
-            raw_df = pd.read_excel(data_path) 
-            
-            # Clean column names (strip hidden spaces, replace internal spaces with underscores)
-            raw_df.columns = raw_df.columns.str.strip().str.replace(r'\s+', '_', regex=True)
-            
-            # Save the clean dataframe to a fast binary format for next time
-            print(f"💾 Caching to {cache_path} for instant loading next time...")
-            raw_df.to_parquet(cache_path, index=False)
-            
-        # 2. CHRONOLOGICAL SPLIT (80% Train / 20% Val)
-        split_idx = int(len(raw_df) * 0.8)
-        if self.split == 'train':
-            df = raw_df.iloc[:split_idx].copy()
-        elif self.split == 'val':
-            df = raw_df.iloc[split_idx:].copy()
-        else:
-            raise ValueError("Split must be 'train' or 'val'")
-            
-        print(f"Loaded {len(df)} rows for {self.split.upper()}.")
-        
-        # 3. SEPARATE THE 3 PARTITIONS
         # x: Measured Now (100% Certain Context)
         self.x_cols = [
             'COMP_Suction_Pressure', 
@@ -74,6 +48,58 @@ class SCADAPipelineDataset(Dataset):
             'KPI_Turbine_Heat_Rate'
         ]
         
+        self.all_required_cols = self.x_cols + self.u_cols + self.theta_cols
+        
+        # 2. LOAD DATA TO RAM (WITH PARQUET CACHING & COLUMN PRUNING)
+        cache_path = data_path.replace('.xlsx', '.parquet').replace('.xls', '.parquet')
+        
+        if os.path.exists(cache_path):
+            print(f"⚡ FAST LOAD: Reading ONLY {len(self.all_required_cols)} columns from cached Parquet (Split: {split.upper()})...")
+            # Parquet reads incredibly fast when only requesting specific columns
+            raw_df = pd.read_parquet(cache_path, columns=self.all_required_cols)
+        else:
+            print(f"🐌 SLOW LOAD: Reading ONLY {len(self.all_required_cols)} columns from Excel. This saves massive RAM...")
+            
+            # Helper function: Excel headers might be messy. We clean them on the fly 
+            # to check if they belong in our required list before wasting RAM on them.
+            def is_required_col(col_name):
+                clean_name = re.sub(r'\s+', '_', str(col_name).strip())
+                return clean_name in self.all_required_cols
+                
+            raw_df = pd.read_excel(data_path, usecols=is_required_col) 
+            
+            # Clean column names in the loaded dataframe to perfectly match our lists
+            raw_df.columns = raw_df.columns.str.strip().str.replace(r'\s+', '_', regex=True)
+            
+            # Deduplicate column names (Parquet strictly requires unique column names)
+            cols = pd.Series(raw_df.columns)
+            for dup in cols[cols.duplicated()].unique(): 
+                mask = cols == dup
+                cols[mask] = [f"{dup}_{i}" if i > 0 else dup for i in range(mask.sum())]
+            raw_df.columns = cols
+            
+            # ---> FIX: Force numeric types BEFORE saving to Parquet! <---
+            # This turns strings like "Bad Input" or "Offline" into blank NaNs so Parquet doesn't crash
+            print("🧹 Sanitizing textual artifacts (like 'Bad Input') into NaNs before caching...")
+            for col in self.all_required_cols:
+                if col in raw_df.columns:
+                    raw_df[col] = pd.to_numeric(raw_df[col], errors='coerce')
+            
+            # Save the clean, slimmed-down dataframe to a fast binary format for next time
+            print(f"💾 Caching slimmed data to {cache_path} for instant loading next time...")
+            raw_df.to_parquet(cache_path, index=False)
+            
+        # 3. CHRONOLOGICAL SPLIT (80% Train / 20% Val)
+        split_idx = int(len(raw_df) * 0.8)
+        if self.split == 'train':
+            df = raw_df.iloc[:split_idx].copy()
+        elif self.split == 'val':
+            df = raw_df.iloc[split_idx:].copy()
+        else:
+            raise ValueError("Split must be 'train' or 'val'")
+            
+        print(f"Loaded {len(df)} rows for {self.split.upper()}.")
+        
         # 4. PREPROCESSING & TRACKING
         self._process_and_track(df)
 
@@ -82,7 +108,7 @@ class SCADAPipelineDataset(Dataset):
         Handles scaling/standardization and triggers the visual tracker.
         """
         # A. Store RAW arrays (Forcing numeric types to prevent np.std crashes)
-        # 1. apply(pd.to_numeric) turns text like "Offline" into NaN
+        # 1. apply(pd.to_numeric) turns text like "Offline" into NaN (Already done, but safe to repeat)
         # 2. ffill() copies the last known good sensor value forward
         # 3. bfill() catches any NaNs at the very beginning of the dataset
         # 4. fillna(0.0) is the absolute final fallback
@@ -106,7 +132,8 @@ class SCADAPipelineDataset(Dataset):
             # If we are Validation (or Inference), load the math calculated by the training phase!
             if not os.path.exists(self.scaler_path):
                 raise FileNotFoundError(f"Scaler not found at {self.scaler_path}. Run training first!")
-            self.scaler_stats = torch.load(self.scaler_path)
+            # ---> FIX: Add weights_only=False to bypass PyTorch 2.6 security checks <---
+            self.scaler_stats = torch.load(self.scaler_path, weights_only=False)
             print(f"🔄 Loaded existing scaler state from {self.scaler_path}")
 
         # Actually apply the scaling math
