@@ -2,8 +2,6 @@
 
 This directory contains the data engineering pipeline for the Genesis SCADA Normalizing Flow.
 
-Per the architecture outlined in the DOE research grant (Section 5.2 and 8.3), this pipeline transitions the problem from predicting instantaneous states to predicting 4-hour continuous trajectories using sliding windows and Functional Principal Component Analysis (PCA).
-
 ## 🏗️ Pipeline Architecture
 
 The data flow consists of two primary scripts that must be executed in order:
