@@ -15,7 +15,14 @@ class SMPCTrainer:
         self.log_to_wandb = log_to_wandb
         
         # AdamW is the industry standard optimizer for Normalizing Flows
-        self.optimizer = AdamW(self.model.parameters(), lr=learning_rate, weight_decay=1e-4)
+        # weight_decay increased heavily to combat the massive train/val overfitting gap
+        self.optimizer = AdamW(self.model.parameters(), lr=learning_rate, weight_decay=1e-2)
+
+        # ReduceLROnPlateau: Halves the LR when val_loss stops improving for 3 epochs.
+        # This is the #1 fix for the "jumping validation loss" problem in Normalizing Flows.
+        self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+            self.optimizer, mode='min', factor=0.5, patience=3
+        )
         
         # Setup local checkpoint directory
         self.checkpoint_dir = "outputs/checkpoints"
@@ -28,7 +35,7 @@ class SMPCTrainer:
         print(f"\n🚀 Starting training on device: {self.device.upper()}")
         
         if self.log_to_wandb:
-            wandb.watch(self.model, log="all", log_freq=10)
+            wandb.watch(self.model, log="all", log_freq=50)
             
         global_step = 0
             
@@ -44,24 +51,26 @@ class SMPCTrainer:
                 condition = batch['condition'].to(self.device)
                 
                 self.optimizer.zero_grad()
-                loss = self.model.compute_loss(theta, condition)
-                loss.backward()
 
-                # --- FIX: GRADIENT CLIPPING ---
-                # This prevents the "Loss Spikes" we saw in your logs. 
-                # It caps the gradients so the model doesn't over-react to SCADA anomalies.
-                torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
+                # NOTE: torch.autocast float16 is intentionally NOT used here.
+                # Normalizing Flows use exp(s) in affine coupling layers which overflows
+                # in float16 (max ~65504), causing NaN loss and training collapse.
+                # MPS speedup comes from num_workers + batch size instead.
+                loss = self.model.compute_loss(theta, condition)
+
+                loss.backward()
+                # Strict grad clipping to prevent unstable MLP extrapolation
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=5.0)
                 self.optimizer.step()
                 
                 epoch_train_loss += loss.item()
                 pbar_train.set_postfix({"loss": f"{loss.item():.4f}"})
                 
-                # Log metrics per batch for granular visualization
-                if self.log_to_wandb:
+                # Only log every 50 steps — wandb.log() has network overhead.
+                if self.log_to_wandb and global_step % 50 == 0:
                     wandb.log({
-                        "train/batch_loss": loss.item(),
-                        "epoch": epoch
-                    }, step=global_step)
+                        "train/batch_loss": loss.item()
+                    })
                 
                 global_step += 1
             
@@ -71,13 +80,19 @@ class SMPCTrainer:
             # Pass the train loss in so we can print it accurately
             avg_val_loss = self.evaluate(epoch, avg_train_loss)
             
+            # --- LR SCHEDULING ---
+            # Step the scheduler based on val loss — this is what tames the jumping curve
+            self.scheduler.step(avg_val_loss)
+            current_lr = self.optimizer.param_groups[0]['lr']
+
             # --- LOGGING & SAVING ---
             if self.log_to_wandb:
                 wandb.log({
-                    "epoch": epoch, 
+                    "epoch": epoch,
                     "train/epoch_loss": avg_train_loss,
-                    "val/epoch_loss": avg_val_loss
-                }, step=global_step)
+                    "val/epoch_loss": avg_val_loss,
+                    "learning_rate": current_lr
+                })
                 
             # Save the "Best" model based on unseen validation data
             if avg_val_loss < self.best_val_loss:
@@ -98,14 +113,15 @@ class SMPCTrainer:
         self.model.eval() # Turn off training features like Dropout
         epoch_val_loss = 0.0
         
-        pbar_val = tqdm(self.val_dataloader, desc=f"Epoch {epoch:03d}/{self.epochs} [VAL]  ", leave=False)
+        pbar_val = tqdm(self.val_dataloader, desc=f"Epoch {epoch:03d}/{self.epochs} [VAL]  ")
         
         with torch.no_grad(): # Disable physics gradient tracking to save memory/speed
             for batch in pbar_val:
                 theta = batch['theta'].to(self.device)
                 condition = batch['condition'].to(self.device)
-                
+
                 loss = self.model.compute_loss(theta, condition)
+
                 epoch_val_loss += loss.item()
                 pbar_val.set_postfix({"val_loss": f"{loss.item():.4f}"})
                 

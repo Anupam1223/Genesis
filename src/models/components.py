@@ -9,21 +9,23 @@ class ResidualMLP(nn.Module):
     The 'Brain' of the Coupling Layer.
     Uses GELU for smooth physics gradients and Residual skip connections.
     """
-    def __init__(self, input_dim, hidden_dim, output_dim, num_layers=4):
+    def __init__(self, input_dim, hidden_dim, output_dim, num_layers=4, dropout_rate=0.1):
         super().__init__()
         
         self.initial_layer = nn.Linear(input_dim, hidden_dim)
         
-        # Build residual blocks
+        # Build residual blocks with Dropout
         self.blocks = nn.ModuleList([
             nn.Sequential(
                 nn.Linear(hidden_dim, hidden_dim),
                 nn.GELU(),
+                nn.Dropout(dropout_rate),
                 nn.Linear(hidden_dim, hidden_dim)
             ) for _ in range(num_layers)
         ])
         
         self.activation = nn.GELU()
+        self.dropout = nn.Dropout(dropout_rate)
         
         # [SLIDE 38, STEP 2: ZERO-INIT]
         # The final layer that outputs s and t. 
@@ -33,7 +35,7 @@ class ResidualMLP(nn.Module):
         nn.init.zeros_(self.final_layer.bias)
 
     def forward(self, x):
-        out = self.activation(self.initial_layer(x))
+        out = self.dropout(self.activation(self.initial_layer(x)))
         
         # Pass through residual blocks (output = F(x) + x)
         for block in self.blocks:

@@ -89,14 +89,19 @@ class SCADAPipelineDataset(Dataset):
             print(f"💾 Caching slimmed data to {cache_path} for instant loading next time...")
             raw_df.to_parquet(cache_path, index=False)
             
-        # 3. CHRONOLOGICAL SPLIT (80% Train / 20% Val)
-        split_idx = int(len(raw_df) * 0.8)
+        # 3. CHRONOLOGICAL SPLIT (70% Train / 15% Val / 15% Test)
+        n = len(raw_df)
+        train_end = int(n * 0.70)
+        val_end = int(n * 0.85)
+        
         if self.split == 'train':
-            df = raw_df.iloc[:split_idx].copy()
+            df = raw_df.iloc[:train_end].copy()
         elif self.split == 'val':
-            df = raw_df.iloc[split_idx:].copy()
+            df = raw_df.iloc[train_end:val_end].copy()
+        elif self.split == 'test':
+            df = raw_df.iloc[val_end:].copy()
         else:
-            raise ValueError("Split must be 'train' or 'val'")
+            raise ValueError("Split must be 'train', 'val', or 'test'")
             
         print(f"Loaded {len(df)} rows for {self.split.upper()}.")
         
