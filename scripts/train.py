@@ -4,6 +4,8 @@ import torch
 from torch.utils.data import DataLoader
 import wandb
 
+os.environ['PYTORCH_ENABLE_MPS_FALLBACK'] = '1' # Enable fallback to CPU for unsupported ops on MPS
+
 # Add the root directory to path so python can find the 'src' folder
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
