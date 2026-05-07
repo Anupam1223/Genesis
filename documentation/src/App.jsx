@@ -4,6 +4,7 @@ import { Layers, Database, Box } from 'lucide-react';
 import IntroSection from './sections/IntroSection';
 import PreprocessingSection from './sections/PreprocessingSection';
 import DatasetSection from './sections/DatasetSection';
+import PreprocessingMath from './sections/PreprocessingMath';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('intro');
@@ -11,6 +12,7 @@ export default function App() {
   const tabs = [
     { id: 'intro', label: 'Introduction', icon: Box },
     { id: 'preprocessing', label: 'Data Preprocessing', icon: Layers },
+    { id: 'preprocessing-math', label: 'Preprocessing Math', icon: Layers },
     { id: 'dataset', label: 'Dataset Interface', icon: Database },
   ];
 
@@ -51,6 +53,7 @@ export default function App() {
           <main className="flex-1 bg-white rounded-2xl shadow-sm border border-slate-200 p-6 md:p-8 min-h-[500px]">
             {activeTab === 'intro' && <IntroSection />}
             {activeTab === 'preprocessing' && <PreprocessingSection />}
+            {activeTab === 'preprocessing-math' && <PreprocessingMath />}
             {activeTab === 'dataset' && <DatasetSection />}
           </main>
         </div>
