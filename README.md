@@ -61,6 +61,30 @@ python src/data/preprocessing.py
 ```
 
 
+### Step 1b: Explore Preprocessed Data (Optional but Recommended)
+
+After running preprocessing, you can visually inspect everything that was produced using the exploration notebook.
+
+## 📓 Notebooks
+
+All notebooks live in the `notebooks/` directory. Open them in VS Code directly, or launch Jupyter:
+
+```bash
+jupyter notebook notebooks/
+```
+
+### `explore_preprocessing.ipynb`
+
+Visually inspect all artifacts produced by `src/data/preprocessing.py`. Run this after Step 1.
+
+- **Part 1** — Shape and contents of `train / val / test` parquet splits
+- **Part 2** — What the scalers learned (means, standard deviations, medians, IQRs per sensor)
+- **Part 3** — How much variance each of the 12 PCA components captures (with charts)
+- **Part 4** — How PCA coefficients evolve across time windows
+- **Part 5** — Reconstructing a full 4-hour sensor trajectory from just 12 coefficients
+
+> No data is uploaded anywhere — everything runs locally against your `data/processed/` and `outputs/checkpoints/` files.
+
 ### Step 2: Start Training
 
 Execute the main training script. This will initialize the Normalizing Flow, start the Apple Silicon GPU-accelerated training loop, and log granular batch-level results to your Weights & Biases dashboard.
@@ -79,6 +103,7 @@ python scripts/evaluate.py
 
 ## 📂 Project Structure
 
+* `notebooks/`: Jupyter notebooks for exploration, debugging, and analysis. See below for available notebooks and what each one covers.
 * `src/data/`: Pipeline for trajectory windowing, PCA compression (`preprocessing.py`), and scaling (`dataset.py`).
 * `src/models/`: Contains the `PipelineConditionalFlow` and Coupling layers.
 * `src/training/`: The `SMPCTrainer` which handles the log-likelihood loss and gradient clipping.

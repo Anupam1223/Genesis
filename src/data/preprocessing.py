@@ -43,6 +43,9 @@ def main():
         df = pd.read_parquet(INPUT_PATH)
 
     df.columns = df.columns.str.strip().str.replace(r'\s+', '_', regex=True)
+    
+    # --- CRITICAL FIX: Drop duplicated columns caused by name cleanup to prevent pd.to_numeric crashes ---
+    df = df.loc[:, ~df.columns.duplicated()].copy()
 
     # Clean extreme artifacts and fill gaps
     print("🧹 Purging NaNs, Infs, and Flatlined Sensors...")
@@ -87,6 +90,10 @@ def main():
     theta_scaler.fit(theta_array[:train_end + WINDOW_SIZE])
     
     theta_scaled = theta_scaler.transform(theta_array)
+    
+    # Fix for RobustScaler dividing by zero when IQR is exactly 0 (constant core distribution with spikes)
+    theta_scaled = np.nan_to_num(theta_scaled, nan=0.0, posinf=0.0, neginf=0.0)
+    
     theta_scaled = np.clip(theta_scaled, -20.0, 20.0)
 
     # 5. VIRTUAL WINDOWING FOR SCENARIOS
@@ -104,21 +111,28 @@ def main():
     
     # --- CRITICAL FIX: np.float64 for Apple Silicon M4 BLAS computation bug ---
     fit_batch = np.ascontiguousarray(pca_input[fit_indices], dtype=np.float64)
+    fit_batch = np.nan_to_num(fit_batch, nan=0.0, posinf=0.0, neginf=0.0)
     
-    pca = PCA(n_components=N_COMPONENTS)
+    # Use svd_solver='full' to prevent Apple Silicon randomized math crashes
+    pca = PCA(n_components=N_COMPONENTS, svd_solver='full')
     pca.fit(fit_batch)
     
     variance_kept = sum(pca.explained_variance_ratio_) * 100
     print(f"✨ PCA Fit Complete! Captured {variance_kept:.2f}% of future variance.")
 
     # 7. SAFE BATCH TRANSFORM
+    # Use np.einsum instead of pca.transform() to bypass Apple Silicon BLAS matmul bug
     print("🔄 Compressing all curves...")
+    pca_mean = np.nan_to_num(pca.mean_, nan=0.0, posinf=0.0, neginf=0.0)
+    pca_components = np.nan_to_num(pca.components_, nan=0.0, posinf=0.0, neginf=0.0)
     theta_pca_features = np.zeros((M, N_COMPONENTS), dtype=np.float64)
     BATCH_SIZE = 5000
     for i in range(0, M, BATCH_SIZE):
         end = min(i + BATCH_SIZE, M)
         batch = np.ascontiguousarray(pca_input[i:end], dtype=np.float64)
-        theta_pca_features[i:end] = pca.transform(batch)
+        batch = np.nan_to_num(batch, nan=0.0, posinf=0.0, neginf=0.0)
+        centered = batch - pca_mean
+        theta_pca_features[i:end] = np.einsum('ij,kj->ik', centered, pca_components)
 
     # 8. EXPORT
     print("🏗️ Saving final artifacts...")

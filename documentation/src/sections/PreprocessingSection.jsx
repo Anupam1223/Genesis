@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   Layers, 
   ChevronRight, 
@@ -17,7 +17,8 @@ import {
   Save,
   Package,
   Database,
-  FileSearch
+  FileSearch,
+  Terminal
 } from 'lucide-react';
 
 // ==========================================
@@ -66,7 +67,6 @@ const AnimatedRawData = () => {
             <stop offset="100%" stopColor="transparent" />
           </linearGradient>
         </defs>
-        {/* Messy signal with gaps */}
         <path 
           d="M0,50 L20,30 L30,80 L40,40 M60,60 L70,20 L80,90 L90,50 L100,50 M120,40 L130,60 L140,10 L150,70 L160,50 M180,30 L190,80 L200,40" 
           fill="none" 
@@ -75,7 +75,6 @@ const AnimatedRawData = () => {
           strokeDasharray="200"
           strokeDashoffset={offset}
         />
-        {/* Highlight Gap Boxes */}
         <g className={`transition-opacity duration-300 ${scanned ? 'opacity-100' : 'opacity-0'}`}>
           <rect x="40" y="20" width="20" height="60" fill="#ef4444" fillOpacity="0.2" stroke="#ef4444" strokeDasharray="2,2" />
           <rect x="100" y="20" width="20" height="60" fill="#ef4444" fillOpacity="0.2" stroke="#ef4444" strokeDasharray="2,2" />
@@ -118,7 +117,6 @@ const AnimatedCleaning = () => {
   return (
     <div className="relative w-full h-full bg-slate-900 rounded-xl overflow-hidden flex flex-col items-center justify-center border border-slate-800 p-4 pb-14 gap-6">
       
-      {/* Gap Filling Demo */}
       <div className="w-full flex items-center justify-between px-8">
         <div className="text-xs text-slate-400 w-24">1. Forward Fill</div>
         <svg viewBox="0 0 100 20" className="flex-1 h-8 mx-4">
@@ -130,7 +128,6 @@ const AnimatedCleaning = () => {
         <CheckCircle size={16} className={`transition-colors ${isFilled ? 'text-emerald-500' : 'text-slate-600'}`} />
       </div>
 
-      {/* Micro-noise Demo */}
       <div className="w-full flex items-center justify-between px-8">
         <div className="text-xs text-slate-400 w-24">2. Micro-Noise (Anti-Flatline)</div>
         <svg viewBox="0 0 100 20" className="flex-1 h-8 mx-4">
@@ -190,18 +187,15 @@ const AnimatedSplit = () => {
     <div className="relative w-full h-full bg-slate-900 rounded-xl overflow-hidden flex flex-col items-center justify-center p-6 pb-14 border border-slate-800 gap-4">
       <div className="text-xs text-slate-400 mb-2">Chronological Data Stream</div>
       
-      {/* Stream */}
       <div className="w-full h-4 bg-slate-800 rounded-full overflow-hidden relative">
         <div 
           className="absolute top-0 left-0 h-full bg-slate-500 transition-all duration-75"
           style={{ width: `${progress}%` }}
         />
-        {/* Scissor lines */}
         <div className="absolute top-0 left-[70%] h-full w-1 bg-white/50 z-10" />
         <div className="absolute top-0 left-[85%] h-full w-1 bg-white/50 z-10" />
       </div>
 
-      {/* Buckets */}
       <div className="flex w-full gap-2 mt-4 h-24 text-xs font-bold">
         <div className="flex-1 bg-blue-900/40 border-2 border-blue-600/50 rounded-lg flex flex-col justify-end overflow-hidden relative">
           <div className="absolute top-2 text-center w-full text-blue-400">TRAIN 70%</div>
@@ -227,13 +221,12 @@ const AnimatedSplit = () => {
 };
 
 const AnimatedScale = () => {
-  const [view, setView] = useState('inputs'); // 'inputs' | 'targets'
+  const [view, setView] = useState('inputs'); 
   const [isScaled, setIsScaled] = useState(false);
 
   return (
     <div className="relative w-full h-full bg-slate-900 rounded-xl overflow-hidden flex flex-col items-center justify-center border border-slate-800 p-6 pb-14 pt-16">
       
-      {/* Toggle View Header */}
       <div className="absolute top-4 w-full flex justify-center gap-2 px-6">
         <button 
           onClick={() => { setView('inputs'); setIsScaled(false); }}
@@ -260,7 +253,6 @@ const AnimatedScale = () => {
             <div className={`absolute w-full border-t border-dashed border-blue-500/50 transition-all duration-700 ${isScaled ? 'top-16 opacity-100' : 'top-16 opacity-0'}`} />
             <div className={`absolute right-2 text-[10px] text-blue-400 transition-all duration-700 ${isScaled ? 'top-12 opacity-100' : 'top-12 opacity-0'}`}>Mean = 0</div>
 
-            {/* Well-behaved data points */}
             {[50, 65, 45, 55, 70, 40].map((h, i) => (
               <div 
                 key={i} 
@@ -284,15 +276,12 @@ const AnimatedScale = () => {
           </div>
 
           <div className="relative w-full h-32 border-b border-l border-slate-700 flex items-end justify-around pb-2">
-            {/* Clipping Guides */}
             <div className={`absolute w-full border-t border-dashed border-emerald-500/50 transition-all duration-700 ${isScaled ? 'top-6 opacity-100' : 'top-0 opacity-0'}`} />
             <div className={`absolute right-2 text-[10px] text-emerald-500 transition-all duration-700 ${isScaled ? 'top-2 opacity-100' : 'top-0 opacity-0'}`}>+20 limit</div>
 
-            {/* Data Points */}
             <div className={`w-8 rounded-t transition-all duration-700 ${isScaled ? 'bg-emerald-500' : 'bg-slate-600'}`} style={{ height: isScaled ? '30%' : '5%' }} />
             <div className={`w-8 rounded-t transition-all duration-700 ${isScaled ? 'bg-emerald-500' : 'bg-slate-600'}`} style={{ height: isScaled ? '50%' : '10%' }} />
             
-            {/* The Outlier Spike */}
             <div className={`w-8 rounded-t transition-all duration-700 flex items-start justify-center ${isScaled ? 'bg-emerald-400' : 'bg-red-500'}`} 
                  style={{ height: isScaled ? '85%' : '98%' }}>
                  {!isScaled && <span className="text-[10px] text-white mt-1 animate-pulse font-bold">SPIKE!</span>}
@@ -325,9 +314,9 @@ const AnimatedWindow = () => {
       const next = p + 15;
       if (next > 80) {
         setExtracted([]);
-        return 0; // Reset
+        return 0;
       }
-      setExtracted(curr => [...curr, next].slice(-4)); // Keep last 4 visible
+      setExtracted(curr => [...curr, next].slice(-4)); 
       return next;
     });
   };
@@ -336,10 +325,8 @@ const AnimatedWindow = () => {
     <div className="relative w-full h-full bg-slate-900 rounded-xl overflow-hidden flex flex-col items-center justify-center border border-slate-800 p-4 pb-14">
       <div className="text-xs text-slate-400 mb-4 font-mono">Continuous Data Array (1D)</div>
       
-      {/* Base timeline with sliding window */}
       <svg viewBox="0 0 100 20" className="w-[90%] h-12 overflow-visible">
         <path d="M0,10 Q20,0 40,10 T80,10 T100,10" fill="none" stroke="#475569" strokeWidth="1" />
-        {/* The sliding window box */}
         <rect x={pos} y="0" width="20" height="20" fill="#3b82f6" fillOpacity="0.3" stroke="#60a5fa" strokeWidth="1" rx="2" className="transition-all duration-300" />
       </svg>
 
@@ -348,7 +335,6 @@ const AnimatedWindow = () => {
         <div className="text-xs text-slate-500">Extracting 2D Matrix...</div>
       </div>
 
-      {/* Stack of extracted windows */}
       <div className="flex flex-col gap-1 mt-4 h-24 justify-end perspective-1000">
         {extracted.map((_, i) => (
           <div key={`${_}-${i}`} className="w-48 h-4 bg-blue-900/50 border border-blue-500/30 rounded flex items-center justify-around px-2 animate-in slide-in-from-top-2 fade-in">
@@ -377,7 +363,6 @@ const AnimatedPCA = () => {
     <div className="relative w-full h-full bg-slate-900 rounded-xl overflow-hidden flex flex-col items-center justify-center border border-slate-800 gap-6 p-6 pb-14">
       <div className="flex justify-between w-full items-center">
         
-        {/* High Dim Input */}
         <div className="flex flex-col items-center group">
           <div className="w-20 h-24 rounded-lg border border-slate-700 bg-slate-800/50 flex flex-wrap gap-[2px] p-2 overflow-hidden relative">
             {Array.from({length: 80}).map((_, i) => (
@@ -388,7 +373,6 @@ const AnimatedPCA = () => {
           <div className="text-xs text-red-400 mt-2 font-bold bg-red-500/10 px-2 py-1 rounded">1,920 Dimensions</div>
         </div>
         
-        {/* Compression Engine */}
         <div className="flex flex-col items-center relative">
           <div className={`text-[10px] absolute -top-6 whitespace-nowrap px-2 py-1 rounded-full transition-colors duration-500 ${isCompressed ? 'text-blue-200 bg-blue-700 shadow-[0_0_10px_#2563eb]' : 'text-slate-500 bg-slate-800'}`}>PCA Math Engine</div>
           <svg width="60" height="40" viewBox="0 0 60 40">
@@ -397,7 +381,6 @@ const AnimatedPCA = () => {
           </svg>
         </div>
 
-        {/* Low Dim Output */}
         <div className="flex flex-col items-center">
           <div className="w-20 h-24 flex items-end gap-1 border-b border-slate-700 pb-1 relative">
             {[80, 60, 45, 35, 25, 15, 10, 8, 5, 4, 3, 2].map((val, i) => (
@@ -438,7 +421,6 @@ const AnimatedExport = () => {
     <div className="relative w-full h-full bg-slate-900 rounded-xl overflow-hidden flex flex-col items-center justify-center border border-slate-800 gap-6 p-6 pb-14">
       
       <div className="flex items-center justify-between w-full max-w-sm relative mt-4">
-        {/* 3 Separate Dataframes Merging */}
         <div className="flex flex-col gap-2 relative z-10">
           <div className={`w-20 h-8 rounded bg-blue-900/50 border-2 border-blue-500 flex items-center justify-center text-xs font-bold text-blue-400 transition-transform duration-700 ${isExporting ? 'translate-x-12 translate-y-10' : ''}`}>X (Cond)</div>
           <div className={`w-20 h-8 rounded bg-emerald-900/50 border-2 border-emerald-500 flex items-center justify-center text-xs font-bold text-emerald-400 transition-transform duration-700 ${isExporting ? 'translate-x-12 z-20' : ''}`}>U (Ctrl)</div>
@@ -447,7 +429,6 @@ const AnimatedExport = () => {
 
         <ChevronRight size={24} className={`text-slate-600 transition-opacity duration-500 ${isExporting ? 'opacity-0' : 'opacity-100'}`} />
 
-        {/* Disk Storage & Models Output */}
         <div className="flex flex-col gap-3">
           <div className={`flex items-center gap-2 transition-all duration-700 delay-300 ${isExporting ? 'opacity-100 translate-x-0' : 'opacity-0 translate-x-4'}`}>
             <Database size={18} className="text-amber-400" />
@@ -472,12 +453,11 @@ const AnimatedExport = () => {
 };
 
 const AnimatedAnatomy = () => {
-  const [view, setView] = useState('parquet'); // 'parquet' or 'pkl'
+  const [view, setView] = useState('parquet'); 
 
   return (
     <div className="relative w-full h-full bg-slate-900 rounded-xl overflow-hidden flex flex-col p-4 pb-14 border border-slate-800">
       
-      {/* Header Toggle */}
       <div className="flex justify-center gap-3 mb-6 mt-2">
          <VisualButton onClick={() => setView('parquet')} active={view === 'parquet'}>
             <Database size={14}/> .parquet Contents
@@ -487,7 +467,6 @@ const AnimatedAnatomy = () => {
          </VisualButton>
       </div>
 
-      {/* Dynamic Content */}
       <div className="flex-1 flex flex-col justify-center px-2">
         {view === 'parquet' ? (
           <div className="flex flex-col gap-3 h-full justify-center animate-in fade-in duration-300 slide-in-from-bottom-2">
@@ -550,6 +529,182 @@ const AnimatedAnatomy = () => {
   );
 };
 
+const AnimatedWalkthrough = () => {
+  const [activePart, setActivePart] = useState(0);
+  const lineRefs = useRef({});
+
+  const codeLines = [
+    { text: "def main():", part: null },
+    { text: "    print(\"🚀 Starting Clean SCADA Trajectory Preprocessing...\")", part: null },
+    { text: "    start_time = time.time()", part: null },
+    { text: "", part: null },
+    { text: "    # --- CONFIGURATION ---", part: 0 },
+    { text: "    INPUT_PATH = \"data/raw/DataAllParts.parquet\"", part: 0 },
+    { text: "    OUTPUT_PATH = \"data/processed/DataAllParts_PCA.parquet\"", part: 0 },
+    { text: "    CHECKPOINT_DIR = \"outputs/checkpoints\"", part: 0 },
+    { text: "    WINDOW_SIZE = 14400   # 4 hours", part: 0 },
+    { text: "    DOWNSAMPLE_RATE = 60  # Compress trajectory to 1-minute intervals", part: 0 },
+    { text: "    N_COMPONENTS = 12     # 12 shapes to capture >90% variance", part: 0 },
+    { text: "", part: 0 },
+    { text: "    # 1. DEFINE COLUMNS", part: 0 },
+    { text: "    x_cols = ['COMP_Suction_Pressure', 'COMP_Suction_Drum_Temperature', ...]", part: 0 },
+    { text: "    u_cols = ['Turbine_SHAFT_SPEED', 'UK_14PDCV-504_H-SEL', ...]", part: 0 },
+    { text: "    theta_cols = ['SEAL_GAS_FLTR_DP', 'LUBE_OIL_LVL_XMTR_HI/LO_TNK', ...]", part: 0 },
+    { text: "", part: 0 },
+    { text: "    # 2. LOAD DATA", part: 0 },
+    { text: "    df = pd.read_parquet(INPUT_PATH)", part: 0 },
+    { text: "    df.columns = df.columns.str.strip().str.replace(r'\\s+', '_', regex=True)", part: 0 },
+    { text: "", part: null },
+    { text: "    # Clean extreme artifacts and fill gaps", part: 1 },
+    { text: "    for col in x_cols + u_cols + theta_cols:", part: 1 },
+    { text: "        df[col] = pd.to_numeric(df[col], errors='coerce')", part: 1 },
+    { text: "    df.replace([np.inf, -np.inf], np.nan, inplace=True)", part: 1 },
+    { text: "    df = df.ffill().bfill().fillna(0.0)", part: 1 },
+    { text: "", part: 1 },
+    { text: "    # Inject micro-noise to flatlined SCADA sensors", part: 1 },
+    { text: "    for col in theta_cols:", part: 1 },
+    { text: "        if df[col].std() < 1e-6:", part: 1 },
+    { text: "            df[col] += np.random.normal(0, 1e-5, size=len(df))", part: 1 },
+    { text: "", part: null },
+    { text: "    # --- CRITICAL FIX: Splitting chronologically FIRST ---", part: 2 },
+    { text: "    M_total = len(df) - WINDOW_SIZE + 1", part: 2 },
+    { text: "    train_end = int(M_total * 0.70)", part: 2 },
+    { text: "    val_end = int(M_total * 0.85)", part: 2 },
+    { text: "", part: null },
+    { text: "    # 3. SCALING X AND U", part: 3 },
+    { text: "    x_scaler = StandardScaler()", part: 3 },
+    { text: "    u_scaler = StandardScaler()", part: 3 },
+    { text: "    x_array = df[x_cols].values", part: 3 },
+    { text: "    u_array = df[u_cols].values", part: 3 },
+    { text: "    x_scaler.fit(x_array[:train_end])", part: 3 },
+    { text: "    u_scaler.fit(u_array[:train_end])", part: 3 },
+    { text: "    x_scaled = x_scaler.transform(x_array)", part: 3 },
+    { text: "    u_scaled = u_scaler.transform(u_array)", part: 3 },
+    { text: "", part: null },
+    { text: "    # 4. ROBUST SCALING FOR THETA TARGET", part: 4 },
+    { text: "    theta_array = df[theta_cols].values", part: 4 },
+    { text: "    theta_scaler = RobustScaler()", part: 4 },
+    { text: "    theta_scaler.fit(theta_array[:train_end + WINDOW_SIZE])", part: 4 },
+    { text: "    theta_scaled = theta_scaler.transform(theta_array)", part: 4 },
+    { text: "    theta_scaled = np.clip(theta_scaled, -20.0, 20.0)", part: 4 },
+    { text: "", part: null },
+    { text: "    # 5. VIRTUAL WINDOWING FOR SCENARIOS", part: 5 },
+    { text: "    windows = np.lib.stride_tricks.sliding_window_view(theta_scaled, window_shape=WINDOW_SIZE, axis=0)", part: 5 },
+    { text: "    windows = np.swapaxes(windows, 1, 2)", part: 5 },
+    { text: "    pca_input = windows[:, ::DOWNSAMPLE_RATE, :].reshape(windows.shape[0], -1)", part: 5 },
+    { text: "    M = pca_input.shape[0]", part: 5 },
+    { text: "", part: null },
+    { text: "    # 6. FAST PCA COMPRESSION", part: 6 },
+    { text: "    rng = np.random.default_rng(42)", part: 6 },
+    { text: "    fit_indices = rng.choice(train_end, size=min(20000, train_end), replace=False)", part: 6 },
+    { text: "    fit_batch = np.ascontiguousarray(pca_input[fit_indices], dtype=np.float64)", part: 6 },
+    { text: "    pca = PCA(n_components=N_COMPONENTS)", part: 6 },
+    { text: "    pca.fit(fit_batch)", part: 6 },
+    { text: "", part: 6 },
+    { text: "    # 7. SAFE BATCH TRANSFORM", part: 6 },
+    { text: "    theta_pca_features = np.zeros((M, N_COMPONENTS), dtype=np.float64)", part: 6 },
+    { text: "    for i in range(0, M, BATCH_SIZE):", part: 6 },
+    { text: "        end = min(i + BATCH_SIZE, M)", part: 6 },
+    { text: "        batch = np.ascontiguousarray(pca_input[i:end], dtype=np.float64)", part: 6 },
+    { text: "        theta_pca_features[i:end] = pca.transform(batch)", part: 6 },
+    { text: "", part: null },
+    { text: "    # 8. EXPORT", part: 7 },
+    { text: "    x_df_scaled = pd.DataFrame(x_scaled[:M], columns=x_cols)", part: 7 },
+    { text: "    u_df_scaled = pd.DataFrame(u_scaled[:M], columns=u_cols)", part: 7 },
+    { text: "    theta_pca_df = pd.DataFrame(theta_pca_features, columns=[f'PCA_{i+1}' for i in range(N_COMPONENTS)])", part: 7 },
+    { text: "    final_df = pd.concat([x_df_scaled, u_df_scaled, theta_pca_df], axis=1)", part: 7 },
+    { text: "", part: 7 },
+    { text: "    final_df.iloc[:train_end].to_parquet(os.path.join(out_dir, \"train.parquet\"), index=False)", part: 7 },
+    { text: "    final_df.iloc[train_end:val_end].to_parquet(os.path.join(out_dir, \"val.parquet\"), index=False)", part: 7 },
+    { text: "    final_df.iloc[val_end:].to_parquet(os.path.join(out_dir, \"test.parquet\"), index=False)", part: 7 },
+    { text: "", part: 7 },
+    { text: "    joblib.dump(x_scaler, os.path.join(CHECKPOINT_DIR, \"x_scaler.pkl\"))", part: 7 },
+    { text: "    joblib.dump(u_scaler, os.path.join(CHECKPOINT_DIR, \"u_scaler.pkl\"))", part: 7 },
+    { text: "    joblib.dump(theta_scaler, os.path.join(CHECKPOINT_DIR, \"theta_base_scaler.pkl\"))", part: 7 },
+    { text: "    joblib.dump(pca, os.path.join(CHECKPOINT_DIR, \"trajectory_pca_model.pkl\"))", part: 7 },
+  ];
+
+  const partExplanations = [
+    { title: "Init & Data Loading", exp: "Sets up configuration paths, defines variable columns (X, U, Theta), and ingests the raw SCADA Parquet file while sanitizing column names." },
+    { title: "Cleaning & Micro-noise", exp: "Forces numerics, handles inf/NaNs via ffill/bfill, and injects 1e-5 normal noise into flatlined sensors to prevent math engine singularities." },
+    { title: "Chronological Split", exp: "Calculates the total valid sliding windows and cleanly splits indices into 70% Train and 15% Val/Test to prevent data leakage." },
+    { title: "Input Scaling (X & U)", exp: "Fits Z-Score normalization purely on the training set inputs, perfectly centering the well-behaved Condition and Control variables." },
+    { title: "Target Scaling (Theta)", exp: "Fits RobustScaler purely on training targets (plus window padding), clipping between -20/20 to protect against massive turbine startup spikes." },
+    { title: "Virtual Windowing", exp: "Uses memory-efficient sliding_window_view to slice 1D targets into 4-hour 2D curves, downsampled to 1-minute intervals." },
+    { title: "PCA Engine Transform", exp: "Samples 20,000 random training curves to fit the PCA model, then iteratively batch-transforms all curves into 12 dense coefficients." },
+    { title: "Artifact Assembly", exp: "Re-binds the arrays into DataFrames, physically splits the data to disk for PyTorch, and serializes the stateful model (.pkl) artifacts." }
+  ];
+
+  useEffect(() => {
+    if (lineRefs.current[activePart]) {
+      lineRefs.current[activePart].scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  }, [activePart]);
+
+  return (
+    // FIX 1: Updated responsive container layout to ensure sharing of space rather than overlapping
+    <div className="relative w-full h-[600px] md:h-full bg-[#0d1117] rounded-xl overflow-hidden flex flex-col md:flex-row border border-slate-700">
+      
+      {/* Left: Code Editor Panel */}
+      <div className="flex-1 overflow-auto py-4 pl-4 pr-4 font-mono text-[10px] sm:text-xs text-slate-300 code-scroll">
+        <style dangerouslySetInnerHTML={{__html: `
+          .code-scroll::-webkit-scrollbar { width: 6px; height: 6px; }
+          .code-scroll::-webkit-scrollbar-track { background: transparent; }
+          .code-scroll::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
+        `}} />
+        {/* FIX 2: Replaced 'w-max min-w-full' with 'w-full' to prevent horizontal overflow */}
+        <div className="w-full">
+          {codeLines.map((line, i) => (
+            <div 
+              key={i} 
+              ref={el => { if (line.part !== null && !lineRefs.current[line.part]) lineRefs.current[line.part] = el; }}
+              // FIX 3: Replaced 'whitespace-pre' with 'whitespace-pre-wrap break-words' to allow code to organically wrap lines
+              className={`px-2 py-0.5 border-l-[3px] transition-all duration-300 whitespace-pre-wrap break-words ${
+                line.part === activePart 
+                  ? 'bg-blue-500/20 border-blue-500 text-blue-200' 
+                  : line.part !== null 
+                    ? 'border-transparent opacity-50 hover:opacity-100 cursor-pointer' 
+                    : 'border-transparent text-slate-500'
+              }`}
+              onClick={() => { if (line.part !== null) setActivePart(line.part) }}
+            >
+              {line.text || ' '}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Right (or Bottom on small screens): Explanation Panel */}
+      {/* FIX 4: Implemented min-h on small screens and rigid flex behavior so the panel doesn't get pushed out of frame */}
+      <div className="w-full min-h-[180px] md:h-full md:w-80 lg:w-96 flex-shrink-0 bg-slate-800 md:border-l border-t md:border-t-0 border-slate-700 p-4 md:p-5 flex flex-col justify-between z-10 shadow-[0_-4px_15px_rgba(0,0,0,0.3)] md:shadow-[-4px_0_15px_rgba(0,0,0,0.3)] overflow-y-auto">
+        <div className="animate-in fade-in slide-in-from-right-2 duration-300" key={activePart}>
+           <div className="text-[10px] sm:text-xs font-bold text-blue-400 mb-1.5 uppercase tracking-wider">
+              Part {activePart + 1} of {partExplanations.length}
+           </div>
+           <h4 className="text-sm sm:text-base font-bold text-white mb-2">{partExplanations[activePart].title}</h4>
+           <p className="text-[11px] sm:text-xs text-slate-300 leading-relaxed bg-slate-900/50 p-3 sm:p-4 rounded-lg border border-slate-700 shadow-inner">
+             {partExplanations[activePart].exp}
+           </p>
+        </div>
+
+        <div className="flex gap-2 justify-between mt-4 md:mt-6">
+           <VisualButton 
+             onClick={() => setActivePart(p => Math.max(0, p - 1))} 
+             disabled={activePart === 0}
+           >
+             <ChevronLeft size={16}/> Prev
+           </VisualButton>
+           <VisualButton 
+             onClick={() => setActivePart(p => Math.min(partExplanations.length - 1, p + 1))} 
+             disabled={activePart === partExplanations.length - 1}
+           >
+             Next <ChevronRight size={16}/>
+           </VisualButton>
+        </div>
+      </div>
+    </div>
+  );
+};
 
 // ==========================================
 // MAIN CONFIGURATION & COMPONENT
@@ -627,6 +782,12 @@ const steps = [
     description: "Let's unpack the final output files. The Parquet files contain our fully concatenated 18-column matrix. The Pickle files (.pkl) contain the internal mathematical states (means, variances, component arrays) of our preprocessing objects.",
     why: "Model impact: When deploying the ML model to a live turbine, we must transform the live sensor streaming data using the EXACT same mathematical scales learned during training. The .pkl files act as the mandatory 'translation dictionary' for live AI inference.",
     Visual: AnimatedAnatomy
+  },
+  {
+    id: 'walkthrough',
+    title: '9. Full Code Walkthrough',
+    icon: Terminal,
+    Visual: AnimatedWalkthrough
   }
 ];
 
@@ -667,55 +828,66 @@ export default function PreprocessingSection() {
       </div>
 
       {/* Main Content Area */}
-      <div className="flex-1 grid grid-cols-1 lg:grid-cols-2 gap-8 min-h-[420px]">
-        
-        {/* Left Col: Explanations & Code */}
-        <div className="flex flex-col gap-5 min-w-0">
-          <div className="flex items-center gap-3 mb-1">
+      {step.id === 'walkthrough' ? (
+        <div className="flex-1 flex flex-col gap-4 min-w-0 min-h-[500px]">
+          <div className="flex items-center gap-3">
             <div className="p-2.5 bg-slate-900 rounded-xl text-white shadow-md">
               <step.icon size={22} />
             </div>
             <h3 className="text-xl font-extrabold text-slate-900 tracking-tight">{step.title}</h3>
           </div>
-          
-          <div className="text-slate-600 leading-relaxed text-[15px]">
-            {step.description}
-          </div>
-
-          <div className="bg-amber-50/80 border border-amber-200 p-4 rounded-xl shadow-sm relative overflow-hidden">
-            <div className="absolute top-0 left-0 w-1 h-full bg-amber-400"></div>
-            <h4 className="text-sm font-bold text-amber-900 mb-1.5 flex items-center gap-2">
-              <Activity size={16} className="text-amber-600"/>
-              The ML Logic
-            </h4>
-            <p className="text-sm text-amber-800/90 leading-relaxed">{step.why}</p>
-          </div>
-
-          <div className="mt-auto pt-2">
-            <h4 className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2 pl-1">Python Implementation</h4>
-            <div className="relative group">
-              <div className="absolute inset-0 bg-gradient-to-r from-blue-500 to-purple-500 rounded-xl blur opacity-20 group-hover:opacity-30 transition-opacity"></div>
-              <pre className="relative bg-[#0f172a] text-[#e2e8f0] p-4 rounded-xl text-xs sm:text-sm overflow-x-auto font-mono shadow-inner border border-slate-700/50">
-                <code>{step.codeSnippet}</code>
-              </pre>
-            </div>
-          </div>
-        </div>
-
-        {/* Right Col: Visual Representation */}
-        <div className="flex flex-col min-w-0">
-          <div className="flex justify-between items-center mb-3 px-1">
-            <span className="text-sm font-bold text-slate-700">Live Process Visualization</span>
-            <span className="font-mono bg-blue-100 text-blue-700 px-2.5 py-1 rounded-md text-xs font-bold">
-              Step {currentStep + 1} / {steps.length}
-            </span>
-          </div>
-          
           <div className="flex-1 w-full rounded-2xl shadow-lg shadow-slate-200/50 overflow-hidden relative border-4 border-slate-900/5 bg-slate-900">
              <step.Visual />
           </div>
         </div>
-      </div>
+      ) : (
+        <div className="flex-1 grid grid-cols-1 lg:grid-cols-2 gap-8 min-h-[420px]">
+          <div className="flex flex-col gap-5 min-w-0">
+            <div className="flex items-center gap-3 mb-1">
+              <div className="p-2.5 bg-slate-900 rounded-xl text-white shadow-md">
+                <step.icon size={22} />
+              </div>
+              <h3 className="text-xl font-extrabold text-slate-900 tracking-tight">{step.title}</h3>
+            </div>
+            
+            <div className="text-slate-600 leading-relaxed text-[15px]">
+              {step.description}
+            </div>
+
+            <div className="bg-amber-50/80 border border-amber-200 p-4 rounded-xl shadow-sm relative overflow-hidden">
+              <div className="absolute top-0 left-0 w-1 h-full bg-amber-400"></div>
+              <h4 className="text-sm font-bold text-amber-900 mb-1.5 flex items-center gap-2">
+                <Activity size={16} className="text-amber-600"/>
+                The ML Logic
+              </h4>
+              <p className="text-sm text-amber-800/90 leading-relaxed">{step.why}</p>
+            </div>
+
+            <div className="mt-auto pt-2">
+              <h4 className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-2 pl-1">Python Implementation</h4>
+              <div className="relative group">
+                <div className="absolute inset-0 bg-gradient-to-r from-blue-500 to-purple-500 rounded-xl blur opacity-20 group-hover:opacity-30 transition-opacity"></div>
+                <pre className="relative bg-[#0f172a] text-[#e2e8f0] p-4 rounded-xl text-xs sm:text-sm overflow-x-auto font-mono shadow-inner border border-slate-700/50">
+                  <code>{step.codeSnippet}</code>
+                </pre>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex flex-col min-w-0">
+            <div className="flex justify-between items-center mb-3 px-1">
+              <span className="text-sm font-bold text-slate-700">Live Process Visualization</span>
+              <span className="font-mono bg-blue-100 text-blue-700 px-2.5 py-1 rounded-md text-xs font-bold">
+                Step {currentStep + 1} / {steps.length}
+              </span>
+            </div>
+            
+            <div className="flex-1 w-full rounded-2xl shadow-lg shadow-slate-200/50 overflow-hidden relative border-4 border-slate-900/5 bg-slate-900">
+               <step.Visual />
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Controls */}
       <div className="flex items-center justify-between mt-8 pt-6 border-t border-slate-200">
@@ -732,7 +904,7 @@ export default function PreprocessingSection() {
           disabled={currentStep === steps.length - 1}
           className="flex items-center gap-2 px-6 py-2.5 rounded-xl text-sm font-bold transition-all text-white bg-blue-600 hover:bg-blue-700 hover:shadow-lg hover:-translate-y-0.5 disabled:opacity-40 disabled:hover:translate-y-0 disabled:cursor-not-allowed disabled:shadow-none"
         >
-          {currentStep === steps.length - 1 ? 'Finish Pipeline' : 'Next Step'} <ChevronRight size={18} />
+          {currentStep === steps.length - 1 ? 'Finish Walkthrough' : 'Next Step'} <ChevronRight size={18} />
         </button>
       </div>
 
