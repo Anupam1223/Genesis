@@ -5,8 +5,8 @@ from tqdm import tqdm
 import wandb
 
 class SMPCTrainer:
-    def __init__(self, model, train_dataloader, val_dataloader, learning_rate=1e-3, epochs=50, device="mps", log_to_wandb=False):
-        # Move the model to the Apple Metal GPU
+    def __init__(self, model, train_dataloader, val_dataloader, learning_rate=5e-4, epochs=50, device="mps", log_to_wandb=False):
+        # Move the model to the Apple Metal GPU (or CUDA)
         self.model = model.to(device)
         self.train_dataloader = train_dataloader
         self.val_dataloader = val_dataloader
@@ -14,14 +14,14 @@ class SMPCTrainer:
         self.device = device
         self.log_to_wandb = log_to_wandb
         
-        # AdamW is the industry standard optimizer for Normalizing Flows
-        # weight_decay increased heavily to combat the massive train/val overfitting gap
-        self.optimizer = AdamW(self.model.parameters(), lr=learning_rate, weight_decay=1e-2)
+        # AdamW is the industry standard optimizer. 
+        # Weight decay lowered to 1e-4 for Spline Flows (too high can break knot positioning!)
+        self.optimizer = AdamW(self.model.parameters(), lr=learning_rate, weight_decay=1e-4)
 
-        # ReduceLROnPlateau: Halves the LR when val_loss stops improving for 3 epochs.
-        # This is the #1 fix for the "jumping validation loss" problem in Normalizing Flows.
+        # ReduceLROnPlateau: Halves the LR when val_loss stops improving.
+        # Spline Flows are highly sensitive to LR; this stabilizes the jagged peak training.
         self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-            self.optimizer, mode='min', factor=0.5, patience=3
+            self.optimizer, mode='min', factor=0.5, patience=3, min_lr=1e-6
         )
         
         # Setup local checkpoint directory
@@ -32,7 +32,7 @@ class SMPCTrainer:
         self.best_val_loss = float('inf')
 
     def train(self):
-        print(f"\n🚀 Starting training on device: {self.device.upper()}")
+        print(f"\n🚀 Starting Phase III Spline training on device: {self.device.upper()}")
         
         if self.log_to_wandb:
             wandb.watch(self.model, log="all", log_freq=50)
@@ -53,20 +53,21 @@ class SMPCTrainer:
                 self.optimizer.zero_grad()
 
                 # NOTE: torch.autocast float16 is intentionally NOT used here.
-                # Normalizing Flows use exp(s) in affine coupling layers which overflows
-                # in float16 (max ~65504), causing NaN loss and training collapse.
-                # MPS speedup comes from num_workers + batch size instead.
+                # Neural Spline Flows heavily utilize division in the rational-quadratic 
+                # equation which can easily underflow/overflow in float16, causing NaN loss.
                 loss = self.model.compute_loss(theta, condition)
 
                 loss.backward()
-                # Strict grad clipping to prevent unstable MLP extrapolation
-                torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=5.0)
+                
+                # Strict grad clipping to prevent unstable Spline Knot extrapolation
+                # We tighten this significantly to 1.0 for splines (down from 5.0 for affine)
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
                 self.optimizer.step()
                 
                 epoch_train_loss += loss.item()
                 pbar_train.set_postfix({"loss": f"{loss.item():.4f}"})
                 
-                # Only log every 50 steps — wandb.log() has network overhead.
+                # Only log every 50 steps to avoid network overhead.
                 if self.log_to_wandb and global_step % 50 == 0:
                     wandb.log({
                         "train/batch_loss": loss.item()
@@ -77,11 +78,10 @@ class SMPCTrainer:
             avg_train_loss = epoch_train_loss / len(self.train_dataloader)
             
             # --- VALIDATION PHASE ---
-            # Pass the train loss in so we can print it accurately
             avg_val_loss = self.evaluate(epoch, avg_train_loss)
             
             # --- LR SCHEDULING ---
-            # Step the scheduler based on val loss — this is what tames the jumping curve
+            # Step the scheduler based on val loss
             self.scheduler.step(avg_val_loss)
             current_lr = self.optimizer.param_groups[0]['lr']
 
@@ -110,7 +110,7 @@ class SMPCTrainer:
         """
         Runs the model on unseen data without updating weights.
         """
-        self.model.eval() # Turn off training features like Dropout
+        self.model.eval()
         epoch_val_loss = 0.0
         
         pbar_val = tqdm(self.val_dataloader, desc=f"Epoch {epoch:03d}/{self.epochs} [VAL]  ")
@@ -127,8 +127,6 @@ class SMPCTrainer:
                 
         avg_val_loss = epoch_val_loss / len(self.val_dataloader)
         
-        # --- FIX: PRINT BUG ---
-        # Now correctly shows the difference between Train and Val performance
         print(f"   ↳ Train Loss: {avg_train_loss:.4f} | Val Loss: {avg_val_loss:.4f}")
         
         return avg_val_loss
