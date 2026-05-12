@@ -491,16 +491,18 @@ const AnimatedScheduler = () => {
         {/* Loss chart */}
         <div className="w-full max-w-md mx-auto bg-slate-800/60 border border-slate-700 rounded-xl p-3">
           <div className="text-[9px] text-slate-500 font-bold uppercase tracking-wider mb-1">Val Loss</div>
-          <svg width="100%" viewBox={`0 0 ${chartW} ${chartH}`} className="overflow-visible">
-            {[0.25, 0.5, 0.75, 1].map(f => (
-              <line key={f} x1="0" y1={chartH * (1-f)} x2={chartW} y2={chartH * (1-f)} stroke="#334155" strokeWidth="0.5" strokeDasharray="3" />
-            ))}
-            {history.length > 1 && <polyline points={lossPoints} fill="none" stroke="#38bdf8" strokeWidth="2" />}
-            {fireEpochs.map(fe => {
-              const x = ((fe - 1) / (MAX_EPOCH - 1)) * chartW;
-              return <line key={fe} x1={x} y1={0} x2={x} y2={chartH} stroke="#f59e0b" strokeWidth="1" strokeDasharray="4" />;
-            })}
-          </svg>
+          <div className="overflow-hidden rounded">
+            <svg width="100%" viewBox={`-2 -4 ${chartW + 4} ${chartH + 6}`}>
+              {[0.25, 0.5, 0.75, 1].map(f => (
+                <line key={f} x1="0" y1={chartH * (1-f)} x2={chartW} y2={chartH * (1-f)} stroke="#334155" strokeWidth="0.5" strokeDasharray="3" />
+              ))}
+              {history.length > 1 && <polyline points={lossPoints} fill="none" stroke="#38bdf8" strokeWidth="2" />}
+              {fireEpochs.map(fe => {
+                const x = ((fe - 1) / (MAX_EPOCH - 1)) * chartW;
+                return <line key={fe} x1={x} y1={0} x2={x} y2={chartH} stroke="#f59e0b" strokeWidth="1" strokeDasharray="4" />;
+              })}
+            </svg>
+          </div>
           {fireEpochs.length > 0 && (
             <div className="flex items-center gap-2 mt-1">
               <div className="w-4 h-px bg-amber-500 border-dashed border-t border-amber-500"></div>
@@ -512,9 +514,11 @@ const AnimatedScheduler = () => {
         {/* LR chart */}
         <div className="w-full max-w-md mx-auto bg-slate-800/60 border border-slate-700 rounded-xl p-3">
           <div className="text-[9px] text-slate-500 font-bold uppercase tracking-wider mb-1">Learning Rate</div>
-          <svg width="100%" viewBox={`0 0 ${chartW} ${lrChartH}`} className="overflow-visible">
-            {history.length > 1 && <polyline points={lrPoints} fill="none" stroke="#f59e0b" strokeWidth="2" />}
-          </svg>
+          <div className="overflow-hidden rounded">
+            <svg width="100%" viewBox={`-2 -4 ${chartW + 4} ${lrChartH + 6}`}>
+              {history.length > 1 && <polyline points={lrPoints} fill="none" stroke="#f59e0b" strokeWidth="2" />}
+            </svg>
+          </div>
         </div>
 
         <p className="text-center text-[11px] text-slate-400 px-2 max-w-md mx-auto">

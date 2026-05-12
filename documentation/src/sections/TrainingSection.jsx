@@ -501,23 +501,25 @@ const AnimatedTrainingLoop = () => {
         {/* Loss chart */}
         <div className="w-full max-w-md mx-auto bg-slate-800/60 border border-slate-700 rounded-xl p-3">
           <div className="text-[9px] text-slate-500 font-bold uppercase tracking-wider mb-2">Training Loss Curve</div>
-          <svg width="100%" viewBox={`0 0 ${chartW} ${chartH}`} className="overflow-visible">
-            {/* Grid lines */}
-            {[0.25, 0.5, 0.75, 1].map(f => (
-              <line key={f} x1="0" y1={chartH * (1 - f)} x2={chartW} y2={chartH * (1 - f)}
-                stroke="#334155" strokeWidth="0.5" strokeDasharray="3" />
-            ))}
-            {losses.length > 1 && (
-              <polyline points={svgPoints} fill="none" stroke="#f97316" strokeWidth="2"
-                className="drop-shadow-[0_0_4px_#f97316]" />
-            )}
-            {losses.length > 0 && (() => {
-              const last = losses[losses.length - 1];
-              const x = ((losses.length - 1) / (MAX_EPOCH - 1)) * chartW;
-              const y = chartH - (last.v / maxLoss) * chartH;
-              return <circle cx={x} cy={y} r="3" fill="#f97316" className="animate-pulse" />;
-            })()}
-          </svg>
+          <div className="overflow-hidden rounded">
+            <svg width="100%" viewBox={`-2 -4 ${chartW + 4} ${chartH + 6}`}>
+              {/* Grid lines */}
+              {[0.25, 0.5, 0.75, 1].map(f => (
+                <line key={f} x1="0" y1={chartH * (1 - f)} x2={chartW} y2={chartH * (1 - f)}
+                  stroke="#334155" strokeWidth="0.5" strokeDasharray="3" />
+              ))}
+              {losses.length > 1 && (
+                <polyline points={svgPoints} fill="none" stroke="#f97316" strokeWidth="2"
+                  className="drop-shadow-[0_0_4px_#f97316]" />
+              )}
+              {losses.length > 0 && (() => {
+                const last = losses[losses.length - 1];
+                const x = ((losses.length - 1) / (MAX_EPOCH - 1)) * chartW;
+                const y = chartH - (last.v / maxLoss) * chartH;
+                return <circle cx={x} cy={y} r="3" fill="#f97316" className="animate-pulse" />;
+              })()}
+            </svg>
+          </div>
         </div>
 
         {/* W&B status */}
