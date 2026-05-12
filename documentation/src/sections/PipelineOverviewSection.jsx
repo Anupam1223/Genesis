@@ -760,6 +760,267 @@ const AnimatedEpochLoop = () => {
 
 // ─── Step 5 · The Final Output ────────────────────────────────────────────────
 
+// ─── Step 4b · One Batch Inside the Flow ─────────────────────────────────────
+
+const AnimatedBatchInsideFlow = () => {
+  const [epoch, setEpoch] = useState(1);
+  const [batch, setBatch] = useState(0);
+  const [flowStep, setFlowStep] = useState(-1); // -1=idle, 0-7=active
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [logdets, setLogdets] = useState([null, null, null, null]);
+  const [loss, setLoss] = useState(null);
+  const [done, setDone] = useState(false);
+
+  const TOTAL_BATCHES = 6; // visual only
+  const NUM_LAYERS = 4;
+
+  const seed = (e, b) => Math.sin(e * 17.3 + b * 5.7) * 0.5 + 0.5;
+
+  const reset = () => {
+    setEpoch(1); setBatch(0); setFlowStep(-1);
+    setLogdets([null, null, null, null]); setLoss(null);
+    setDone(false); setIsPlaying(false);
+  };
+
+  useEffect(() => {
+    if (!isPlaying) return;
+    // flowStep -1 → 0..9, then advance batch/epoch
+    const t = setTimeout(() => {
+      setFlowStep(fs => {
+        const next = fs + 1;
+        // reveal logdets as layers complete (steps 1-4)
+        if (next >= 1 && next <= NUM_LAYERS) {
+          setLogdets(prev => {
+            const arr = [...prev];
+            arr[next - 1] = +(-0.3 - seed(epoch, batch) * 0.4 - next * 0.05).toFixed(3);
+            return arr;
+          });
+        }
+        // compute loss at step 5
+        if (next === 5) {
+          setLoss(+(1.8 - epoch * 0.025 - batch * 0.01 + seed(epoch, batch) * 0.12).toFixed(3));
+        }
+        // backward + step at 6,7
+        if (next === 8) {
+          // advance batch or epoch
+          setBatch(b => {
+            if (b + 1 >= TOTAL_BATCHES) {
+              setEpoch(e => {
+                if (e >= 4) { setDone(true); setIsPlaying(false); return e; }
+                return e + 1;
+              });
+              return 0;
+            }
+            return b + 1;
+          });
+          setLogdets([null, null, null, null]);
+          setLoss(null);
+          return -1; // restart for next batch
+        }
+        return next;
+      });
+    }, flowStep === -1 ? 400 : 700);
+    return () => clearTimeout(t);
+  }, [isPlaying, flowStep, epoch, batch]);
+
+  // Layer definitions
+  const layers = [
+    { label: 'Layer 1 MLP', a: 'θ₁–₆ + x', b: 'θ₇–₁₂', out: 'z₇–₁₂', color: 'sky' },
+    { label: 'Layer 2 MLP', a: 'θ₇–₁₂ + x', b: 'θ₁–₆', out: 'z₁–₆', color: 'violet' },
+    { label: 'Layer 3 MLP', a: 'z₁–₆ + x', b: 'z₇–₁₂', out: 'z\'₇–₁₂', color: 'fuchsia' },
+    { label: 'Layer 4 MLP', a: 'z₇–₁₂ + x', b: 'z₁–₆', out: 'z_final', color: 'rose' },
+  ];
+
+  const colorMap = {
+    sky: { bg: 'bg-sky-900/30', border: 'border-sky-500/60', text: 'text-sky-300', dot: 'bg-sky-400' },
+    violet: { bg: 'bg-violet-900/30', border: 'border-violet-500/60', text: 'text-violet-300', dot: 'bg-violet-400' },
+    fuchsia: { bg: 'bg-fuchsia-900/30', border: 'border-fuchsia-500/60', text: 'text-fuchsia-300', dot: 'bg-fuchsia-400' },
+    rose: { bg: 'bg-rose-900/30', border: 'border-rose-500/60', text: 'text-rose-300', dot: 'bg-rose-400' },
+  };
+
+  return (
+    <div className="w-full h-full bg-slate-900 flex flex-col">
+      <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-3 min-h-0">
+        <div className="text-xs text-slate-400 font-mono text-center">One Batch Inside the Flow — All 4 Layers, One Loss, One Backprop</div>
+
+        {/* Epoch + Batch progress */}
+        <div className="flex gap-2 justify-center">
+          <div className="bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 flex items-center gap-2">
+            <span className="text-[9px] text-slate-500 uppercase">Epoch</span>
+            <div className="flex gap-1">
+              {[1,2,3,4].map(e => (
+                <div key={e} className={`w-5 h-5 rounded text-[8px] font-bold flex items-center justify-center border transition-all ${
+                  e < epoch ? 'bg-cyan-600 border-cyan-500 text-white' :
+                  e === epoch ? 'bg-cyan-900/60 border-cyan-400 text-cyan-300 ring-1 ring-cyan-400' :
+                  'bg-slate-700 border-slate-600 text-slate-500'
+                }`}>{e}</div>
+              ))}
+            </div>
+          </div>
+          <div className="bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 flex items-center gap-2">
+            <span className="text-[9px] text-slate-500 uppercase">Batch</span>
+            <div className="flex gap-0.5">
+              {Array.from({length: TOTAL_BATCHES}).map((_, b) => (
+                <div key={b} className={`w-4 h-4 rounded-sm text-[7px] font-bold flex items-center justify-center transition-all ${
+                  b < batch ? 'bg-emerald-600 text-white' :
+                  b === batch && flowStep >= 0 ? 'bg-amber-500/80 text-black ring-1 ring-amber-400 animate-pulse' :
+                  'bg-slate-700 text-slate-500'
+                }`}>{b+1}</div>
+              ))}
+              <span className="text-[8px] text-slate-500 ml-1 self-center">…×N</span>
+            </div>
+          </div>
+        </div>
+
+        {/* 4 coupling layers */}
+        <div className="flex flex-col gap-1.5">
+          {layers.map((layer, i) => {
+            const active = flowStep === i + 1;
+            const done_layer = flowStep > i + 1 || (flowStep === -1 && logdets[i] !== null);
+            const c = colorMap[layer.color];
+            return (
+              <div key={i}>
+                <div className={`rounded-lg border p-2 transition-all duration-500 ${
+                  active ? `${c.bg} ${c.border} shadow-lg scale-[1.01]` :
+                  done_layer ? 'bg-slate-800/40 border-slate-600' :
+                  'bg-slate-800/20 border-slate-700/50 opacity-40'
+                }`}>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <div className={`w-1.5 h-1.5 rounded-full ${active ? `${c.dot} animate-pulse` : done_layer ? 'bg-emerald-500' : 'bg-slate-600'}`}/>
+                      <span className={`text-[10px] font-bold ${active ? c.text : done_layer ? 'text-slate-300' : 'text-slate-600'}`}>{layer.label}</span>
+                    </div>
+                    {logdets[i] !== null && (
+                      <span className="font-mono text-[9px] text-amber-300 bg-amber-900/30 px-1.5 py-0.5 rounded border border-amber-700/50">
+                        logdet = {logdets[i]}
+                      </span>
+                    )}
+                  </div>
+                  <div className={`flex items-center gap-1 mt-1 text-[9px] font-mono ${active ? 'text-slate-300' : 'text-slate-600'}`}>
+                    <span className={active ? c.text : 'text-slate-600'}>[{layer.a}]</span>
+                    <span>→ MLP → W,H,D → spline({layer.b})</span>
+                    <span>→</span>
+                    <span className={active ? 'text-emerald-300' : 'text-slate-600'}>{layer.out}</span>
+                  </div>
+                </div>
+                {i < NUM_LAYERS - 1 && (
+                  <div className={`flex items-center gap-1 justify-center py-0.5 transition-all ${flowStep > i + 1 || (flowStep === -1 && logdets[i] !== null) ? 'opacity-100' : 'opacity-20'}`}>
+                    <div className="w-12 h-px bg-slate-600"/>
+                    <span className="text-[7px] text-slate-500 font-mono">flip(z)</span>
+                    <div className="w-12 h-px bg-slate-600"/>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Loss + backward */}
+        <div className={`rounded-xl border p-3 transition-all duration-500 ${flowStep >= 5 ? 'bg-slate-800/60 border-slate-600 opacity-100' : 'opacity-20 border-slate-700/30'}`}>
+          <div className="flex flex-col gap-1.5">
+            {/* loss formula */}
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-[9px] text-slate-400 font-mono">loss =</span>
+              <span className="text-[9px] font-mono text-violet-300">-log_prob(z_final)</span>
+              <span className="text-[9px] text-slate-500">−</span>
+              <span className="text-[9px] font-mono text-amber-300">
+                ({logdets.filter(v=>v!==null).join(' + ') || 'logdet₁+…+logdet₄'})
+              </span>
+              {loss !== null && (
+                <span className="font-mono text-[11px] font-bold text-white ml-1">= {loss}</span>
+              )}
+            </div>
+            {/* backward */}
+            <div className={`transition-all duration-500 ${flowStep >= 6 ? 'opacity-100' : 'opacity-20'}`}>
+              <div className="flex gap-2 mt-1">
+                <div className={`flex-1 rounded-lg border px-2 py-1.5 text-center text-[9px] font-bold transition-all ${flowStep === 6 ? 'bg-rose-900/40 border-rose-500/60 text-rose-300 animate-pulse' : flowStep > 6 ? 'bg-rose-900/20 border-rose-700/40 text-rose-400' : 'border-slate-700 text-slate-600'}`}>
+                  loss.backward()<br/><span className="font-normal text-[8px]">grads flow through all 4 MLPs simultaneously</span>
+                </div>
+                <div className={`flex-1 rounded-lg border px-2 py-1.5 text-center text-[9px] font-bold transition-all ${flowStep === 7 ? 'bg-emerald-900/40 border-emerald-500/60 text-emerald-300 animate-pulse' : flowStep > 7 || (flowStep === -1 && batch > 0) ? 'bg-emerald-900/20 border-emerald-700/40 text-emerald-400' : 'border-slate-700 text-slate-600'}`}>
+                  optimizer.step()<br/><span className="font-normal text-[8px]">all 4 MLP weights update at once</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {done && (
+          <div className="text-center text-[11px] text-emerald-400 font-mono bg-emerald-900/20 border border-emerald-700/40 rounded-lg py-2">
+            ✅ All epochs done — model_best.pt saved to disk
+          </div>
+        )}
+
+        {/* Key insight */}
+        <div className="bg-slate-800/40 border border-slate-700 rounded-xl p-2 text-[9px] text-slate-400 leading-relaxed">
+          <span className="text-white font-bold">Key: </span>
+          The 4 MLPs are <strong className="text-cyan-300">never trained one at a time</strong>. Every batch runs all 4 forward in sequence, computes <strong className="text-amber-300">one shared loss</strong>, then backprop sends gradients <strong className="text-rose-300">backward through all 4 simultaneously</strong>. One batch = one update for every weight in the entire model.
+        </div>
+      </div>
+
+      <div className="flex-shrink-0 flex flex-col gap-2 py-3 px-4 border-t border-slate-700/60 bg-slate-900">
+        {/* Step labels */}
+        <div className="flex justify-center">
+          <div className="text-[9px] font-mono text-slate-400 bg-slate-800 border border-slate-700 rounded px-2 py-1 text-center">
+            {flowStep === -1 && '⏸ Ready — press Next Step or Run Batches'}
+            {flowStep === 0  && '→ Batch loaded into GPU memory'}
+            {flowStep === 1  && '🔵 Layer 1: θ₁–₆ + x → MLP → W,H,D → transform θ₇–₁₂ → logdet₁'}
+            {flowStep === 2  && '🟣 Layer 2: flip → θ₇–₁₂ + x → MLP → W,H,D → transform θ₁–₆ → logdet₂'}
+            {flowStep === 3  && '🟤 Layer 3: flip → MLP → logdet₃'}
+            {flowStep === 4  && '🔴 Layer 4: flip → MLP → z_final + logdet₄'}
+            {flowStep === 5  && '📊 Loss = -log_prob(z_final) − (logdet₁+logdet₂+logdet₃+logdet₄)'}
+            {flowStep === 6  && '⬅ loss.backward() — gradients flow back through ALL 4 MLPs at once'}
+            {flowStep === 7  && '✅ optimizer.step() — all 4 MLP weights updated simultaneously'}
+          </div>
+        </div>
+        {/* Buttons */}
+        <div className="flex justify-center gap-2">
+          <VisualButton onClick={reset} disabled={isPlaying}>
+            <RefreshCw size={14}/> Reset
+          </VisualButton>
+          <VisualButton
+            onClick={() => {
+              if (isPlaying) return;
+              setFlowStep(fs => {
+                const next = fs + 1;
+                if (next >= 1 && next <= NUM_LAYERS) {
+                  setLogdets(prev => {
+                    const arr = [...prev];
+                    arr[next - 1] = +(-0.3 - seed(epoch, batch) * 0.4 - next * 0.05).toFixed(3);
+                    return arr;
+                  });
+                }
+                if (next === 5) {
+                  setLoss(+(1.8 - epoch * 0.025 - batch * 0.01 + seed(epoch, batch) * 0.12).toFixed(3));
+                }
+                if (next === 8) {
+                  setBatch(b => {
+                    if (b + 1 >= TOTAL_BATCHES) {
+                      setEpoch(e => { if (e >= 4) { setDone(true); return e; } return e + 1; });
+                      return 0;
+                    }
+                    return b + 1;
+                  });
+                  setLogdets([null, null, null, null]);
+                  setLoss(null);
+                  return -1;
+                }
+                return next;
+              });
+            }}
+            disabled={isPlaying || done}
+            active={false}
+          >
+            <ChevronRight size={14}/> Next Step
+          </VisualButton>
+          <VisualButton onClick={() => setIsPlaying(v => !v)} active={isPlaying} disabled={done}>
+            {isPlaying ? <Pause size={14}/> : <Play size={14}/>} {isPlaying ? 'Pause' : 'Auto Play'}
+          </VisualButton>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const AnimatedOutput = () => {
   const [mode, setMode] = useState(null); // 'forward' | 'inverse'
   const [generating, setGenerating] = useState(false);
@@ -1110,6 +1371,15 @@ const steps = [
     why: 'The epoch loop is entirely inside SMPCTrainer, not in train.py. This clean separation means train.py stays a simple assembly script and trainer.py is a reusable engine. You can swap the model, change the loss, or add a second validation dataset by only editing trainer.py.',
     codeSnippet: `# Per-epoch sequence inside trainer.train():\n\nfor epoch in 1..50:\n  # 1. TRAIN — update weights on every batch\n  model.train()\n  for batch in train_dataloader:\n    zero_grad → loss → backward\n    → clip(0.5) → AdamW.step()\n    # clip tightened to 0.5 for larger model\n    # (512 dim, 10 layers accumulate larger grads)\n\n  # 2. VALIDATE — no weight updates\n  avg_val_loss = evaluate()  # torch.no_grad()\n\n  # 3. SCHEDULE — maybe halve LR\n  scheduler.step(avg_val_loss)\n\n  # 4. CHECKPOINT — maybe save to disk\n  if avg_val_loss < best_val_loss:\n      save model_best.pt\n  elif epoch % 10 == 0:\n      save model_epoch_N.pt`,
     Visual: AnimatedEpochLoop,
+  },
+  {
+    id: 'batch_inside_flow',
+    title: '4b. One Batch Inside the Flow',
+    icon: GitMerge,
+    description: 'Zoom into a single batch: all 4 coupling layers run forward in sequence, each appending its logdet to a running total. One shared loss is computed. One loss.backward() sends gradients back through all 4 MLPs simultaneously. One optimizer.step() updates every weight at once.',
+    why: 'All 4 MLPs are never trained one at a time. They share a single loss signal and update together every batch. Without this joint training, Layer 1 would optimize for the wrong target — it has no idea what Layers 2-4 will do with its output unless they all participate in the same loss.',
+    codeSnippet: `# One batch — the full loop inside trainer.py:\n\nfor batch in train_dataloader:         # e.g. 4096 samples\n    optimizer.zero_grad()\n\n    # ── FORWARD: all 4 layers in sequence ──\n    z, logdet_1 = layer1(theta, x)     # θ₁–₆+x → W,H,D → transform θ₇–₁₂\n    z = flip(z)\n    z, logdet_2 = layer2(z,     x)     # θ₇–₁₂+x → W,H,D → transform θ₁–₆\n    z = flip(z)\n    z, logdet_3 = layer3(z,     x)\n    z = flip(z)\n    z, logdet_4 = layer4(z,     x)     # → z_final\n\n    total_logdet = logdet_1 + logdet_2 + logdet_3 + logdet_4\n\n    # ── ONE SHARED LOSS ──\n    loss = -( log_prob(z_final) + total_logdet )\n\n    # ── BACKWARD: grads flow through ALL 4 at once ──\n    loss.backward()\n    clip_grad_norm_(model.parameters(), 1.0)\n    optimizer.step()                   # all 4 MLPs update simultaneously`,
+    Visual: AnimatedBatchInsideFlow,
   },
   {
     id: 'output',
