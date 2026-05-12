@@ -1,17 +1,27 @@
 import React, { useState } from 'react';
-import { Layers, Database, Box } from 'lucide-react';
+import { Layers, Database, Box, Cpu, Zap, PlayCircle, GitMerge, Network } from 'lucide-react';
 
 import IntroSection from './sections/IntroSection';
 import PreprocessingSection from './sections/PreprocessingSection';
 import DatasetSection from './sections/DatasetSection';
+import ComponentSection from './sections/ComponentSection';
+import FlowModelSection from './sections/FlowModelSection';
+import TrainingSection from './sections/TrainingSection';
+import TrainerSection from './sections/TrainerSection';
+import PipelineOverviewSection from './sections/PipelineOverviewSection';
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState('intro');
+  const [activeTab, setActiveTab] = useState('overview');
 
   const tabs = [
+    { id: 'overview', label: 'Pipeline Overview', icon: Network },
     { id: 'intro', label: 'Introduction', icon: Box },
     { id: 'preprocessing', label: 'Data Preprocessing', icon: Layers },
     { id: 'dataset', label: 'Dataset Interface', icon: Database },
+    { id: 'components', label: 'Model Components', icon: Cpu },
+    { id: 'flowmodel', label: 'Flow Model', icon: Zap },
+    { id: 'training', label: 'Training Loop', icon: PlayCircle },
+    { id: 'trainer', label: 'SMPCTrainer', icon: GitMerge },
   ];
 
   return (
@@ -49,9 +59,14 @@ export default function App() {
 
           {/* Main Content Area */}
           <main className="flex-1 bg-white rounded-2xl shadow-sm border border-slate-200 p-6 md:p-8 min-h-[500px]">
+            {activeTab === 'overview' && <PipelineOverviewSection />}
             {activeTab === 'intro' && <IntroSection />}
             {activeTab === 'preprocessing' && <PreprocessingSection />}
             {activeTab === 'dataset' && <DatasetSection />}
+            {activeTab === 'components' && <ComponentSection />}
+            {activeTab === 'flowmodel' && <FlowModelSection />}
+            {activeTab === 'training' && <TrainingSection />}
+            {activeTab === 'trainer' && <TrainerSection />}
           </main>
         </div>
       </div>

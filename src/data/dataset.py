@@ -37,8 +37,7 @@ class SCADAPipelineDataset(Dataset):
         
         # 2. FAST LOAD PREPROCESSED PARQUET
         # Construct the target file path based on the split
-        base_dir = os.path.dirname(data_path)
-        split_path = os.path.join(base_dir, f"{self.split}.parquet")
+        split_path = os.path.join(data_path, f"{self.split}.parquet")
         
         print(f"⚡ FAST LOAD: Reading {len(self.all_required_cols)} columns from {split_path}...")
         if not os.path.exists(split_path):
