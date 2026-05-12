@@ -6,9 +6,10 @@ Unlike standard regression models that predict a single instantaneous value, Gen
 
 ## 🏗 Architecture Overview
 
-* **Core Model**: A Conditional RealNVP (Affine Coupling) architecture.
-* **Physics-Informed Trajectories**: Ingests instantaneous sensor context ($x$) and control inputs ($u$) to predict Functional PCA coefficients representing a 4-hour future trajectory ($\theta$).
-* **Hardware Optimized**: Built specifically for Apple Silicon (M4 Max/Ultra) using PyTorch `mps` (Metal Performance Shaders) for blazing-fast in-memory processing.
+* **Core Model**: A Conditional Neural Spline Flow (Rational-Quadratic Coupling) architecture.
+* **Causal Partition**: The parameter space is split into three disjoint groups — measured-now variables $x$ (current SCADA state, fed as conditioning context into the flow), future-shape variables $\theta$ (uncertain PCA trajectory coefficients, what the flow learns to model), and control variables $u$ (shaft speed setpoints, which **bypass Phase II entirely** and are used only at the MPC layer).
+* **Physics-Informed Trajectories**: Ingests instantaneous sensor context ($x$) to predict the conditional distribution $p(\theta | \hat{x})$ over Functional PCA coefficients representing a 4-hour future trajectory.
+* **Hardware Optimized**: Built specifically for Apple Silicon (M4 Max) using PyTorch `mps` (Metal Performance Shaders) for blazing-fast in-memory processing.
 
 ## 🛠 Setup & Installation
 
@@ -54,7 +55,7 @@ The "Brain" of the model depends on which columns you choose. Open `src/data/pre
 
 > ⚠️ **You must run this step if it is your first time running the project, or if you have added a new raw SCADA dataset.**
 
-This script reads your raw Parquet/Excel file, slices it into 4-hour sliding windows, performs Functional PCA compression on the target variables, and saves the optimized training file.
+This script reads your raw Parquet/Excel file, slices it into 4-hour sliding windows, performs Functional PCA compression on the target variables, scales the PCA coefficients (fitted on train only to prevent data leakage), and saves the optimized training splits.
 
 ```bash
 python src/data/preprocessing.py

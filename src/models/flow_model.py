@@ -57,7 +57,9 @@ class PipelineConditionalFlow(nn.Module):
             # [SLIDE 2: THE SWAP]
             # Match the diagram perfectly: Flip the tensor array entirely 
             # so the variables in Half B become the new Half A!
-            z = torch.flip(z, dims=[-1])
+            # .contiguous() is REQUIRED on MPS: torch.flip() returns a non-contiguous
+            # tensor, which causes torch.searchsorted to produce NaN in the spline math.
+            z = torch.flip(z, dims=[-1]).contiguous()
             
         return z, total_log_det
 
@@ -92,7 +94,8 @@ class PipelineConditionalFlow(nn.Module):
         # Run the relay race BACKWARD through the layers
         for layer in reversed(self.layers):
             # Undo the array flip first!
-            z = torch.flip(z, dims=[-1])
+            # .contiguous() required: flip returns non-contiguous tensor on MPS
+            z = torch.flip(z, dims=[-1]).contiguous()
             
             # Run the inverse Spline algebra
             z = layer.inverse(z, condition)

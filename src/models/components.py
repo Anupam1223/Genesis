@@ -201,25 +201,25 @@ class NeuralSplineCouplingLayer(nn.Module):
         unnormalized_heights = raw_params[..., self.num_bins:2*self.num_bins]
         unnormalized_derivatives = raw_params[..., 2*self.num_bins:]
         
-        # 4. IDENTITY TAILS (Check Bounding Box)
-        # If the input is outside [-bound, bound], it stays exactly the same (linear)
-        inside_mask = (theta_2 > -self.bound) & (theta_2 < self.bound)
-        
-        outputs = torch.clone(theta_2)
-        logabsdet = torch.zeros_like(theta_2)
-        
-        # Only transform points inside the box!
-        if inside_mask.any():
-            spline_out, spline_logdet = rational_quadratic_spline(
-                inputs=theta_2[inside_mask],
-                unnormalized_widths=unnormalized_widths[inside_mask, :],
-                unnormalized_heights=unnormalized_heights[inside_mask, :],
-                unnormalized_derivatives=unnormalized_derivatives[inside_mask, :],
-                inverse=False,
-                bound=self.bound
-            )
-            outputs[inside_mask] = spline_out
-            logabsdet[inside_mask] = spline_logdet
+        # 4. IDENTITY TAILS + MPS-SAFE TRANSFORM
+        # torch.where is MPS-compatible and preserves gradients correctly.
+        # Boolean index assignment (outputs[mask] = ...) is broken on MPS —
+        # PYTORCH_ENABLE_MPS_FALLBACK silently drops gradients through that op.
+        inside_mask = (theta_2 >= -self.bound) & (theta_2 <= self.bound)
+
+        # Run the spline on ALL values (torch.where selects result vs identity)
+        spline_out, spline_logdet = rational_quadratic_spline(
+            inputs=theta_2,
+            unnormalized_widths=unnormalized_widths,
+            unnormalized_heights=unnormalized_heights,
+            unnormalized_derivatives=unnormalized_derivatives,
+            inverse=False,
+            bound=self.bound
+        )
+
+        # MPS-safe selection: inside → spline output, outside → identity (pass-through)
+        outputs = torch.where(inside_mask, spline_out, theta_2)
+        logabsdet = torch.where(inside_mask, spline_logdet, torch.zeros_like(spline_logdet))
         
         # 5. FINAL ASSEMBLY
         y_final = torch.cat([theta_1, outputs], dim=-1)
@@ -241,19 +241,17 @@ class NeuralSplineCouplingLayer(nn.Module):
         unnormalized_heights = raw_params[..., self.num_bins:2*self.num_bins]
         unnormalized_derivatives = raw_params[..., 2*self.num_bins:]
         
-        inside_mask = (z_2 > -self.bound) & (z_2 < self.bound)
-        
-        outputs = torch.clone(z_2)
-        
-        if inside_mask.any():
-            spline_out, _ = rational_quadratic_spline(
-                inputs=z_2[inside_mask],
-                unnormalized_widths=unnormalized_widths[inside_mask, :],
-                unnormalized_heights=unnormalized_heights[inside_mask, :],
-                unnormalized_derivatives=unnormalized_derivatives[inside_mask, :],
-                inverse=True,
-                bound=self.bound
-            )
-            outputs[inside_mask] = spline_out
+        inside_mask = (z_2 >= -self.bound) & (z_2 <= self.bound)
+
+        spline_out, _ = rational_quadratic_spline(
+            inputs=z_2,
+            unnormalized_widths=unnormalized_widths,
+            unnormalized_heights=unnormalized_heights,
+            unnormalized_derivatives=unnormalized_derivatives,
+            inverse=True,
+            bound=self.bound
+        )
+
+        outputs = torch.where(inside_mask, spline_out, z_2)
             
         return torch.cat([z_1, outputs], dim=-1)

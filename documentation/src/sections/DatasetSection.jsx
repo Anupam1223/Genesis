@@ -442,21 +442,21 @@ const steps = [
     title: '1. Column Selection',
     icon: Layers,
     description:
-      'dataset.py reads a pre-split parquet file and extracts exactly three column groups: x_cols (3 process state sensors), u_cols (3 control inputs), and theta_cols (12 PCA trajectory coefficients written by preprocessing.py). Nothing else is read.',
+      'dataset.py reads a pre-split parquet file and extracts exactly three column groups: x_cols (3 measured-now process state sensors), u_cols (3 control inputs stored for later use), and theta_cols (12 PCA trajectory coefficients written by preprocessing.py). Only x and theta are used by the flow — u bypasses Phase II entirely per the causal partition.',
     pytorch:
-      'Why these three groups? x and u together describe the current operating point of the compressor — the "conditions" the future trajectory depends on. theta is the compressed 4-hour future. Keeping them as separate named groups makes the downstream concatenation (condition = cat(x, u)) explicit and easy to reconfigure without touching the model.',
+      'Why does u bypass the flow? The causal partition separates measured-now variables (x) from control variables (u). The flow learns p(θ|x̂) — the distribution of uncertain futures given current sensor state. u is the actuator setpoint the operator chooses at the MPC layer, not a conditioning input to the uncertainty model.',
     code: `# Column definitions at top of dataset.py
 
 x_cols = [
-    'COMP_Suction_Pressure',         # Process state
+    'COMP_Suction_Pressure',         # Measured-now state
     'COMP_Suction_Drum_Temperature',
     'KPI_Fuel_Gas_LHV',
-]
+]  # → condition tensor [3]
 
 u_cols = [
     'Turbine_SHAFT_SPEED',           # Control inputs
-    '14PDCV-504_Position',
-    'SEAL_GAS_FLOW',
+    '14PDCV-504_Position',           # BYPASSES Phase II
+    'SEAL_GAS_FLOW',                 # Used at MPC layer only
 ]
 
 theta_cols = [
@@ -470,9 +470,9 @@ theta_cols = [
     title: '2. Tensor Assembly',
     icon: Database,
     description:
-      'During __init__, the full parquet split is loaded into pandas then immediately converted to float32 PyTorch tensors in unified RAM. The condition tensor is built once by concatenating x and u along the feature axis — giving a permanent [N, 6] tensor for the lifetime of the dataset object.',
+      'During __init__, the full parquet split is loaded into pandas then immediately converted to float32 PyTorch tensors in unified RAM. The condition tensor is built from x alone — u is stored separately but does NOT enter the flow. This gives a permanent [N, 3] condition tensor for the lifetime of the dataset object.',
     pytorch:
-      'Why concatenate x and u at dataset time rather than inside the model? It keeps the model completely agnostic to which sensors are "state" vs "control" — the model sees only one condition vector. Adding a 4th control input means changing dataset.py alone, with zero changes to the model architecture.',
+      'Why is condition = x only and not cat(x, u)? The causal partition in the architecture requires the flow to learn p(θ|x̂) — uncertainty conditioned on measured-now state. u is a decision variable chosen by the MPC layer after sampling. Feeding u into the flow would conflate what is known with what is decided.',
     code: `class SCADAPipelineDataset(Dataset):
     def __init__(self, data_path, split):
         path = os.path.join(data_path, f"{split}.parquet")
@@ -487,10 +487,9 @@ theta_cols = [
         self.theta_tensor = torch.tensor(
             df[theta_cols].values, dtype=torch.float32)  # [N, 12]
 
-        # Fuse state + control → single condition vector
-        self.condition_tensor = torch.cat(
-            [x_t, u_t], dim=-1                        # [N, 6]
-        )`,
+        # condition = x only (u bypasses Phase II per causal partition)
+        self.condition_tensor = x_t                   # [N, 3]
+        self.u_tensor = u_t                           # stored, used at MPC layer`,
     Visual: AnimatedTensorAssembly,
   },
   {
@@ -498,9 +497,9 @@ theta_cols = [
     title: '3. In-Memory Layout',
     icon: Cpu,
     description:
-      'Three separate SCADAPipelineDataset instances are constructed — one per chronological split. Each holds its two tensors in RAM for the full training run. The DataLoader wraps each with batch_size=1024 and num_workers=8 for fast parallel prefetching on the M4 Max.',
+      'Three separate SCADAPipelineDataset instances are constructed — one per chronological split. Each holds its tensors in RAM for the full training run. The DataLoader wraps each with batch_size=4096 and num_workers=12 for fast parallel prefetching on the M4 Max.',
     pytorch:
-      "Why load everything into RAM upfront? The M4 Max has 128 GB of unified memory shared between the CPU and the MPS GPU. Loading all windows into float32 tensors at startup means every __getitem__ call is a microsecond tensor slice — no disk I/O, no parquet parsing, and no CPU→GPU copy overhead (MPS unified memory eliminates that cost entirely).",
+      "Why load everything into RAM upfront? The M4 Max has 128 GB of unified memory shared between the CPU and the MPS GPU. Loading all windows into float32 tensors at startup means every __getitem__ call is a microsecond tensor slice — no disk I/O, no parquet parsing, and no CPU→GPU copy overhead. pin_memory is disabled because MPS unified memory eliminates the need for it entirely.",
     code: `# In train.py — three dataset instances
 
 train_dataset = SCADAPipelineDataset(DATA_PATH, "train")
@@ -509,14 +508,14 @@ test_dataset  = SCADAPipelineDataset(DATA_PATH, "test")
 
 # Memory per split (float32 = 4 bytes):
 # theta_tensor:     N × 12 × 4 = N × 48  bytes
-# condition_tensor: N ×  6 × 4 = N × 24  bytes
-# Total per split:  N × 72 bytes
+# condition_tensor: N ×  3 × 4 = N × 12  bytes  ← x only
+# Total per split:  N × 60 bytes
 # 128 GB M4 Max → trivially holds all three
 
 dataloader_kwargs = dict(
-    batch_size  = BATCH_SIZE,   # 1024
-    num_workers = 8,            # parallel prefetch workers
-    pin_memory  = False,        # not needed: MPS unified memory
+    batch_size  = BATCH_SIZE,   # 4096
+    num_workers = 12,           # M4 Max: 14 CPU cores
+    pin_memory  = False,        # MPS unified memory — not needed
     drop_last   = True,
 )`,
     Visual: AnimatedMemoryLayout,
@@ -534,9 +533,9 @@ dataloader_kwargs = dict(
 
     def __getitem__(self, idx):
         # Called once per sample by DataLoader.
-        # DataLoader collates 1024 calls into:
-        #   batch["theta"]     → [1024, 12]
-        #   batch["condition"] → [1024,  6]
+        # DataLoader collates 4096 calls into:
+        #   batch["theta"]     → [4096, 12]
+        #   batch["condition"] → [4096,  3]  ← x only
         return {
             "theta":     self.theta_tensor[idx],
             "condition": self.condition_tensor[idx],
@@ -545,7 +544,7 @@ dataloader_kwargs = dict(
 # In trainer.py the batch is consumed as:
 for batch in train_dataloader:
     theta     = batch["theta"].to(device)      # [B, 12]
-    condition = batch["condition"].to(device)  # [B,  6]
+    condition = batch["condition"].to(device)  # [B,  3]
     loss = model.compute_loss(theta, condition)`,
     Visual: AnimatedWalkthrough,
   },

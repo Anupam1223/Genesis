@@ -162,6 +162,19 @@ def main():
 
     # 8. EXPORT
     print("🏗️ Saving final artifacts...")
+
+    # SCALE PCA COEFFICIENTS — PCA projection does NOT normalize its output scores.
+    # Even though theta was RobustScaled before PCA, the PCA scores have variance = explained_variance_
+    # which can be in the hundreds. We must scale them to ~[-3, 3] so they fall within BOUND=5.0
+    # in the normalizing flow. Fitted on TRAIN only to prevent data leakage.
+    print("⚖️  Applying StandardScaler to PCA coefficients [Fitted on TRAIN only]...")
+    pca_coeff_scaler = StandardScaler()
+    theta_pca_features[:train_end] = pca_coeff_scaler.fit_transform(theta_pca_features[:train_end])
+    theta_pca_features[train_end:val_end] = pca_coeff_scaler.transform(theta_pca_features[train_end:val_end])
+    theta_pca_features[val_end:] = pca_coeff_scaler.transform(theta_pca_features[val_end:])
+    joblib.dump(pca_coeff_scaler, os.path.join(CHECKPOINT_DIR, "pca_coeff_scaler.pkl"))
+    print(f"   PCA coefficients scaled. Train std ≈ {theta_pca_features[:train_end].std():.3f} (target: ~1.0)")
+
     # NOTE: We grab the scaled matrices directly.
     x_df_scaled = pd.DataFrame(x_scaled[:M], columns=x_cols)
     u_df_scaled = pd.DataFrame(u_scaled[:M], columns=u_cols)

@@ -189,10 +189,10 @@ const AnimatedBatchLoop = () => {
       desc: 'PyTorch automatic differentiation walks the computation graph backwards, computing ∂loss/∂param for every weight in every coupling layer.',
     },
     {
-      label: 'clip_grad_norm_(1.0)',
+      label: 'clip_grad_norm_(0.5)',
       icon: <Shield size={14} />,
       color: 'amber',
-      desc: 'If the global gradient norm exceeds 1.0, all gradients are scaled down proportionally. Tightened from 5.0 (affine flows) to 1.0 — spline knot extrapolation is extremely sensitive to large gradient steps.',
+      desc: 'If the global gradient norm exceeds 0.5, all gradients are scaled down proportionally. Tightened from 1.0 to 0.5 for the larger model (512 dim, 10 layers) — bigger models accumulate larger raw gradients and spline knot extrapolation is extremely sensitive to large gradient steps.',
     },
     {
       label: 'optimizer.step()',
@@ -679,7 +679,7 @@ const AnimatedWalkthrough = () => {
   const codeLines = [
     { text: "class SMPCTrainer:", part: null },
     { text: "  def __init__(self, model, train_dataloader, val_dataloader,", part: 0 },
-    { text: "               learning_rate=5e-4, epochs=50, device='mps', log_to_wandb=False):", part: 0 },
+    { text: "               learning_rate=2e-4, epochs=50, device='mps', log_to_wandb=False):", part: 0 },
     { text: "    self.model = model.to(device)", part: 0 },
     { text: "    self.optimizer = AdamW(self.model.parameters(),", part: 0 },
     { text: "                          lr=learning_rate, weight_decay=1e-4)", part: 0 },
@@ -701,7 +701,7 @@ const AnimatedWalkthrough = () => {
     { text: "        self.optimizer.zero_grad()", part: 1 },
     { text: "        loss = self.model.compute_loss(theta, condition)  # No float16!", part: 1 },
     { text: "        loss.backward()", part: 1 },
-    { text: "        clip_grad_norm_(self.model.parameters(), max_norm=1.0)", part: 1 },
+    { text: "        clip_grad_norm_(self.model.parameters(), max_norm=0.5)", part: 1 },
     { text: "        self.optimizer.step()", part: 1 },
     { text: "", part: null },
     { text: "        if self.log_to_wandb and global_step % 50 == 0:", part: 1 },

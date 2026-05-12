@@ -62,12 +62,16 @@ class SCADAPipelineDataset(Dataset):
         raw_u = df[self.u_cols].values
 
         # Convert to PyTorch Tensors
+        # All scaling is handled in preprocessing.py:
+        # x, u → StandardScaler | theta PCA coefficients → StandardScaler (after PCA projection)
         self.x_tensor = torch.tensor(raw_x, dtype=torch.float32)
         self.u_tensor = torch.tensor(raw_u, dtype=torch.float32)
         self.theta_tensor = torch.tensor(raw_theta, dtype=torch.float32)
-        
-        # Combine conditions into a single tensor for the "Brain" (MLP)
-        self.condition_tensor = torch.cat([self.x_tensor, self.u_tensor], dim=-1)
+
+        # ARCHITECTURE: condition = x only (measured-now SCADA state)
+        # u (controls) BYPASSES Phase II entirely — it is NOT fed into the coupling layers
+        # See: The Causal Partition diagram — u box labelled "BYPASSES PHASE II"
+        self.condition_tensor = self.x_tensor
 
     def __len__(self):
         return len(self.theta_tensor)

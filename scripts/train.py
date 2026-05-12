@@ -7,7 +7,7 @@ import wandb
 os.environ['PYTORCH_ENABLE_MPS_FALLBACK'] = '1' # Enable fallback to CPU for unsupported ops on MPS
 
 # Add the root directory to path so python can find the 'src' folder
-sys.path.append(os.path.abspath(os.path.dirname(__file__)))
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from src.data.dataset import SCADAPipelineDataset
 from src.models.flow_model import PipelineConditionalFlow
@@ -19,16 +19,17 @@ def main():
     # ==========================================
     DATA_PATH = "data/processed" # Directory containing your train/val/test parquets
     
-    # Training Hyperparameters
-    BATCH_SIZE = 1024      # Optimized for Apple Silicon MPS
+    # Training Hyperparameters — tuned for M4 Max (128GB unified memory)
+    BATCH_SIZE = 4096      # M4 Max can handle 4x larger batches — better GPU utilization
     EPOCHS = 50
-    LEARNING_RATE = 5e-4   # TIGHTENED: Splines need a lower LR than Affine flows (was 1e-3)
+    LEARNING_RATE = 2e-4   # LOWERED: larger model (512 dim, 10 layers) needs a smaller LR to stay stable
     LOG_WANDB = True
+    USE_BF16 = False       # DISABLED: torch.autocast is not stable on MPS backend — causes NaN gradients
     
-    # Phase III Neural Spline Flow Architecture
-    NUM_LAYERS = 6         # Number of coupling layers (Relay race steps)
-    HIDDEN_DIM = 128       # Residual MLP size
-    NUM_BINS = 8           # SPLINE: Number of Rational-Quadratic bins per variable
+    # Phase III Neural Spline Flow Architecture — balanced for M4 Max + dataset size
+    NUM_LAYERS = 6         # Reduced from 10: prevents overfitting on ~720k samples
+    HIDDEN_DIM = 256       # Reduced from 512: better generalisation, still expressive
+    NUM_BINS = 12          # Increased from 8: finer-grained spline segments
     BOUND = 5.0            # SPLINE: The boundary constraint [-5.0, 5.0] matching RobustScaler
     # ==========================================
     
@@ -45,7 +46,9 @@ def main():
                 "device": device,
                 "num_bins": NUM_BINS,
                 "bound": BOUND,
-                "num_layers": NUM_LAYERS
+                "num_layers": NUM_LAYERS,
+                "hidden_dim": HIDDEN_DIM,
+                "use_bf16": USE_BF16
             }
         )
 
@@ -55,13 +58,13 @@ def main():
     val_dataset = SCADAPipelineDataset(data_path=DATA_PATH, split='val', log_to_wandb=False)
     test_dataset = SCADAPipelineDataset(data_path=DATA_PATH, split='test', log_to_wandb=False)
     
-    # Optimized DataLoader settings for Apple Silicon
+    # Optimized DataLoader settings for M4 Max (14-core CPU, 128GB RAM)
     dataloader_kwargs = {
         "batch_size": BATCH_SIZE,
-        "num_workers": 8,
+        "num_workers": 12,          # M4 Max has 14 CPU cores; use 12 for data pipeline
         "persistent_workers": True,
-        "prefetch_factor": 2,
-        "pin_memory": True
+        "prefetch_factor": 4,       # Buffer more batches — 128GB RAM means no pressure
+        "pin_memory": device == "cuda"  # pin_memory is not supported on MPS
     }
 
     train_dataloader = DataLoader(train_dataset, shuffle=True, **dataloader_kwargs)
@@ -92,7 +95,8 @@ def main():
         learning_rate=LEARNING_RATE, 
         epochs=EPOCHS, 
         device=device,
-        log_to_wandb=LOG_WANDB
+        log_to_wandb=LOG_WANDB,
+        use_bf16=USE_BF16
     )
     
     trainer.train()
