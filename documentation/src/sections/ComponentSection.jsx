@@ -152,6 +152,234 @@ const AnimatedResidualMLP = () => {
   );
 };
 
+const AnimatedZeroInit = () => {
+  const [mode, setMode] = useState('random'); // 'random' | 'zero'
+  const [epoch, setEpoch] = useState(0);
+  const [running, setRunning] = useState(false);
+
+  useEffect(() => {
+    let int;
+    if (running) {
+      int = setInterval(() => {
+        setEpoch(e => {
+          if (e >= 5) { setRunning(false); return e; }
+          return e + 1;
+        });
+      }, 700);
+    }
+    return () => clearInterval(int);
+  }, [running]);
+
+  const reset = () => { setEpoch(0); setRunning(false); };
+  const start = () => { reset(); setTimeout(() => setRunning(true), 50); };
+
+  // SVG canvas
+  const W = 220; const H = 180; const PAD = 20;
+  const toSvgX = x => PAD + ((x + 5) / 10) * (W - 2 * PAD);
+  const toSvgY = y => (H - PAD) - ((y + 5) / 10) * (H - 2 * PAD);
+
+  // Identity line: y = x
+  const identityPts = [[-5,-5],[5,5]].map(([x,y]) => `${toSvgX(x)},${toSvgY(y)}`).join(' ');
+
+  // Random init spline knots at epoch 0 (wildly bent) — fixed chaos shape
+  const randomKnots = [[-5,-5],[-3,-1],[0,3],[2,-2],[5,5]];
+  // After "training" with random init, loss explodes — curve gets worse each step
+  const randomEpochOffsets = [
+    [0,0,0,0,0],       // epoch 0
+    [0,0.5,-0.8,0.6,0],// epoch 1: getting more chaotic
+    [0,1.2,-1.8,1.4,0],// epoch 2: diverging
+    [0,2.5,-3.2,2.8,0],// epoch 3: exploding
+    [0,3.5,-4.5,4.0,0],// epoch 4: NaN territory
+    [0,3.5,-4.5,4.0,0],// epoch 5: stuck
+  ];
+  const randomCurveKnots = randomKnots.map(([x,y], i) => [x, Math.max(-5, Math.min(5, y + (randomEpochOffsets[epoch]?.[i] ?? 0)))]);
+
+  // Zero init spline: starts as identity, gradually learns a gentle S-curve
+  const zeroEpochKnots = [
+    [[-5,-5],[-3,-3],[0,0],[3,3],[5,5]],           // epoch 0: perfect identity
+    [[-5,-5],[-3,-2.5],[0,0.3],[3,3.5],[5,5]],     // epoch 1: tiny bend
+    [[-5,-5],[-3,-2],  [0,0.6],[3,3.8],[5,5]],     // epoch 2
+    [[-5,-5],[-3,-1.5],[0,0.9],[3,4.0],[5,5]],     // epoch 3
+    [[-5,-5],[-3,-1.2],[0,1.1],[3,4.1],[5,5]],     // epoch 4
+    [[-5,-5],[-3,-1.0],[0,1.2],[3,4.2],[5,5]],     // epoch 5: learned S-curve
+  ];
+  const zeroCurveKnots = zeroEpochKnots[epoch];
+
+  // Catmull-Rom-ish smooth path from knots
+  const knotsToPath = (knots) => {
+    const pts = knots.map(([x,y]) => [toSvgX(x), toSvgY(y)]);
+    if (pts.length < 2) return '';
+    let d = `M ${pts[0][0]} ${pts[0][1]}`;
+    for (let i = 0; i < pts.length - 1; i++) {
+      const p0 = pts[Math.max(0, i-1)];
+      const p1 = pts[i];
+      const p2 = pts[i+1];
+      const p3 = pts[Math.min(pts.length-1, i+2)];
+      const cp1x = p1[0] + (p2[0]-p0[0])/6;
+      const cp1y = p1[1] + (p2[1]-p0[1])/6;
+      const cp2x = p2[0] - (p3[0]-p1[0])/6;
+      const cp2y = p2[1] - (p3[1]-p1[1])/6;
+      d += ` C ${cp1x} ${cp1y}, ${cp2x} ${cp2y}, ${p2[0]} ${p2[1]}`;
+    }
+    return d;
+  };
+
+  // Loss values
+  const randomLoss = [1.2, 3.8, 12.4, 48.2, 210.0, null][epoch];
+  const zeroLoss   = [1.2, 0.9, 0.65, 0.48, 0.35, 0.26][epoch];
+
+  const randomPath = knotsToPath(randomCurveKnots);
+  const zeroPath   = knotsToPath(zeroCurveKnots);
+
+  return (
+    <div className="w-full h-full bg-slate-900 flex flex-col">
+      <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-3 min-h-0">
+        <div className="text-xs text-slate-400 font-mono text-center">Why Zero-Init? Watch What Happens on Epoch 0</div>
+
+        {/* Mode toggle */}
+        <div className="flex gap-2 justify-center">
+          <button onClick={() => { setMode('random'); reset(); }}
+            className={`text-[10px] px-3 py-1.5 rounded-lg font-bold border transition-all ${mode === 'random' ? 'bg-rose-900/50 border-rose-500 text-rose-300' : 'bg-slate-800 border-slate-600 text-slate-400 hover:border-slate-500'}`}>
+            ⚠️ Random Init (default)
+          </button>
+          <button onClick={() => { setMode('zero'); reset(); }}
+            className={`text-[10px] px-3 py-1.5 rounded-lg font-bold border transition-all ${mode === 'zero' ? 'bg-emerald-900/50 border-emerald-500 text-emerald-300' : 'bg-slate-800 border-slate-600 text-slate-400 hover:border-slate-500'}`}>
+            ✅ Zero Init (our code)
+          </button>
+        </div>
+
+        {/* Side-by-side or single panel */}
+        <div className="grid grid-cols-2 gap-3">
+
+          {/* LEFT — spline curve visual */}
+          <div className={`bg-slate-800/60 rounded-xl border p-2 flex flex-col gap-1 ${mode === 'random' ? 'border-rose-700/50' : 'border-emerald-700/50'}`}>
+            <div className={`text-[9px] font-bold uppercase tracking-wider text-center ${mode === 'random' ? 'text-rose-400' : 'text-emerald-400'}`}>
+              Spline Shape — Epoch {epoch}
+            </div>
+            <div className="overflow-hidden rounded">
+              <svg width="100%" viewBox={`0 0 ${W} ${H}`}>
+                {/* Grid */}
+                {[-4,-2,0,2,4].map(v => (
+                  <g key={v}>
+                    <line x1={toSvgX(v)} y1={PAD} x2={toSvgX(v)} y2={H-PAD} stroke="#1e293b" strokeWidth="1"/>
+                    <line x1={PAD} y1={toSvgY(v)} x2={W-PAD} y2={toSvgY(v)} stroke="#1e293b" strokeWidth="1"/>
+                  </g>
+                ))}
+                {/* Bounding box */}
+                <rect x={PAD} y={PAD} width={W-2*PAD} height={H-2*PAD} fill="none" stroke="#334155" strokeWidth="1" strokeDasharray="3"/>
+                {/* Identity reference line */}
+                <polyline points={identityPts} fill="none" stroke="#334155" strokeWidth="1" strokeDasharray="4"/>
+                <text x={toSvgX(3.5)} y={toSvgY(4.2)} fontSize="7" fill="#475569" textAnchor="middle">y=x (identity)</text>
+                {/* The actual spline */}
+                {mode === 'random' ? (
+                  <path d={randomPath} fill="none" stroke="#f87171" strokeWidth="2.5" className="transition-all duration-500"/>
+                ) : (
+                  <path d={zeroPath} fill="none" stroke="#34d399" strokeWidth="2.5" className="transition-all duration-500"/>
+                )}
+                {/* Axis labels */}
+                <text x={W/2} y={H-2} fontSize="7" fill="#64748b" textAnchor="middle">Input θ</text>
+                <text x={6} y={H/2} fontSize="7" fill="#64748b" textAnchor="middle" transform={`rotate(-90,6,${H/2})`}>Output</text>
+              </svg>
+            </div>
+          </div>
+
+          {/* RIGHT — loss bar + explanation */}
+          <div className="flex flex-col gap-2">
+            <div className={`bg-slate-800/60 rounded-xl border p-2 ${mode === 'random' ? 'border-rose-700/50' : 'border-emerald-700/50'}`}>
+              <div className="text-[9px] font-bold uppercase tracking-wider text-slate-400 mb-1.5">Training Loss</div>
+              {/* Loss bar chart: epochs 0-5 */}
+              <div className="overflow-hidden rounded">
+                <svg width="100%" viewBox="0 0 120 70">
+                  {[0,1,2,3,4,5].map(e => {
+                    const rLoss = [1.2,3.8,12.4,48.2,210,210][e];
+                    const zLoss = [1.2,0.9,0.65,0.48,0.35,0.26][e];
+                    const loss = mode === 'random' ? rLoss : zLoss;
+                    const maxLoss = mode === 'random' ? 210 : 1.2;
+                    const barH = Math.min(55, (loss / maxLoss) * 55);
+                    const isActive = e === epoch;
+                    const color = mode === 'random' ? (e >= 3 ? '#ef4444' : '#f97316') : '#34d399';
+                    return (
+                      <g key={e}>
+                        <rect
+                          x={8 + e * 18} y={60 - barH} width={12} height={barH}
+                          fill={color} fillOpacity={isActive ? 1 : 0.4} rx="1"
+                          className="transition-all duration-500"
+                        />
+                        <text x={14 + e * 18} y={68} textAnchor="middle" fontSize="6" fill={isActive ? '#e2e8f0' : '#64748b'}>{e}</text>
+                      </g>
+                    );
+                  })}
+                  <text x={60} y={8} textAnchor="middle" fontSize="6" fill="#64748b">epoch →</text>
+                </svg>
+              </div>
+              <div className={`text-center font-mono text-[10px] font-bold mt-1 ${mode === 'random' && epoch >= 3 ? 'text-rose-400 animate-pulse' : mode === 'random' ? 'text-orange-300' : 'text-emerald-300'}`}>
+                {mode === 'random'
+                  ? (epoch >= 4 ? '💥 NaN / exploded!' : `Loss: ${[1.2,3.8,12.4,48.2,'∞','∞'][epoch]}`)
+                  : `Loss: ${zeroLoss.toFixed(2)} ✓`
+                }
+              </div>
+            </div>
+
+            {/* What the MLP outputs */}
+            <div className={`bg-slate-800/60 rounded-xl border p-2 text-[9px] leading-relaxed ${mode === 'random' ? 'border-rose-700/30 text-rose-200' : 'border-emerald-700/30 text-emerald-200'}`}>
+              <div className="font-bold uppercase tracking-wider mb-1 text-slate-400">MLP final layer outputs at Epoch 0:</div>
+              {mode === 'random' ? (
+                <div className="font-mono text-rose-300">
+                  W logits: <span className="text-rose-400">[2.3, -1.8, 4.1, ...]</span><br/>
+                  H logits: <span className="text-rose-400">[-3.2, 5.7, -2.1, ...]</span><br/>
+                  D logits: <span className="text-rose-400">[1.9, -4.5, 3.3, ...]</span><br/>
+                  <span className="text-rose-500 mt-1 block">→ Random bin sizes → bent curve → data violently distorted</span>
+                </div>
+              ) : (
+                <div className="font-mono text-emerald-300">
+                  W logits: <span className="text-emerald-400">[0.0, 0.0, 0.0, ...]</span><br/>
+                  H logits: <span className="text-emerald-400">[0.0, 0.0, 0.0, ...]</span><br/>
+                  D logits: <span className="text-emerald-400">[0.0, 0.0, 0.0, ...]</span><br/>
+                  <span className="text-emerald-500 mt-1 block">→ Equal bins → softmax(0)=uniform → curve = y=x ✓</span>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* Why softmax(0) = uniform */}
+        <div className="bg-slate-800/40 border border-slate-700 rounded-xl p-3 text-[10px] text-slate-400 leading-relaxed">
+          <span className="text-white font-bold">The math chain: </span>
+          {mode === 'zero' ? (
+            <>
+              All logits = <code className="text-emerald-300">0.0</code> →{' '}
+              <code className="text-amber-300">softmax([0,0,0,0]) = [0.25, 0.25, 0.25, 0.25]</code> → all bins equal width →{' '}
+              <code className="text-amber-300">softplus(0) = ln(2) ≈ 0.693</code> → all slopes equal →{' '}
+              <span className="text-emerald-300 font-bold">spline = straight diagonal = identity function (y = x)</span>.{' '}
+              Training starts from a neutral, undistorted state.
+            </>
+          ) : (
+            <>
+              Random logits, e.g. <code className="text-rose-300">[-3.2, 5.7, -2.1]</code> →{' '}
+              <code className="text-rose-300">softmax → [0.003, 0.993, 0.004]</code> → one gigantic bin, two tiny ones →{' '}
+              spline is wildly bent on the <strong>very first forward pass</strong> →{' '}
+              <span className="text-rose-400 font-bold">loss jumps to NaN before a single gradient step.</span>
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* Controls */}
+      <div className="flex-shrink-0 flex justify-center gap-3 py-3 border-t border-slate-700/60 bg-slate-900">
+        <VisualButton onClick={() => setEpoch(e => Math.max(0, e-1))} disabled={epoch === 0 || running} active={false}>
+          <ChevronLeft size={14}/> Prev Epoch
+        </VisualButton>
+        <VisualButton onClick={start} active={running}>
+          <Play size={14}/> {running ? 'Training...' : 'Run Training'}
+        </VisualButton>
+        <VisualButton onClick={() => setEpoch(e => Math.min(5, e+1))} disabled={epoch === 5 || running} active={true}>
+          Next Epoch <ChevronRight size={14}/>
+        </VisualButton>
+      </div>
+    </div>
+  );
+};
+
 const AnimatedConstraints = () => {
   const [applied, setApplied] = useState(false);
 
@@ -340,6 +568,179 @@ const AnimatedScaffolding = () => {
         </VisualButton>
         <VisualButton onClick={() => setIsPlaying(!isPlaying)} active={isPlaying}>
           {isPlaying ? <Pause size={14} /> : <Play size={14} />} {isPlaying ? "Pause" : "Play Sequence"}
+        </VisualButton>
+        <VisualButton onClick={() => setStep(s => Math.min(MAX_STEP, s + 1))} active={true} disabled={step === MAX_STEP || isPlaying}>
+          Next Step <ChevronRight size={14} />
+        </VisualButton>
+      </div>
+    </div>
+  );
+};
+
+const AnimatedCumsumExplainer = () => {
+  const [step, setStep] = useState(0);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const MAX_STEP = 4;
+
+  useEffect(() => {
+    let int;
+    if (isPlaying) {
+      int = setInterval(() => setStep(s => { if (s + 1 > MAX_STEP) { setIsPlaying(false); return s; } return s + 1; }), 2800);
+    }
+    return () => clearInterval(int);
+  }, [isPlaying]);
+
+  // The raw widths, their cumsum, padded, and mapped values
+  const widths  = [2.0, 3.0, 5.0];
+  const cumsum  = [2.0, 5.0, 10.0];
+  const padded  = [0.0, 2.0, 5.0, 10.0];
+  const mapped  = [-5.0, -3.0, 0.0, 5.0];
+  const bound   = 5.0;
+
+  // Ruler bar config
+  const totalW = 260;
+  const barH   = 28;
+  const colors = ['#38bdf8','#f472b6','#a78bfa'];
+  const binLabels = ['Bin 0','Bin 1','Bin 2'];
+
+  // SVG ruler: segments sized by W[i]/10 * totalW
+  const segments = widths.map((w, i) => ({ w, px: (w / 10) * totalW, color: colors[i], label: binLabels[i] }));
+  const cumsumPx = cumsum.map(v => (v / 10) * totalW);
+  const mappedPx = mapped.map(v => ((v + bound) / (2 * bound)) * totalW);
+
+  return (
+    <div className="w-full h-full bg-slate-900 flex flex-col">
+      <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-4 min-h-0">
+        <div className="text-xs text-slate-400 font-mono text-center">cumsum → F.pad → map: Building Knot Positions from Bin Sizes</div>
+
+        {/* ─── STEP 0: Raw sizes ─── */}
+        <div className="bg-slate-800/50 border border-slate-700 rounded-xl p-3 flex flex-col gap-2">
+          <div className="flex justify-between items-center">
+            <span className="text-[10px] font-bold text-sky-400 uppercase tracking-wider">Step 0 — Raw W (bin sizes from MLP)</span>
+            <span className="font-mono text-[10px] text-sky-300 bg-sky-900/30 px-2 py-0.5 rounded border border-sky-700">[2.0, 3.0, 5.0]</span>
+          </div>
+          <p className="text-[10px] text-slate-400 leading-relaxed">These are <strong className="text-sky-300">widths</strong> — how wide each bin is. They do NOT tell you where bins <em>start or end</em>. Think of them like the lengths of 3 planks laid end-to-end.</p>
+          {/* Ruler showing segments */}
+          <div className="overflow-hidden rounded">
+            <svg width="100%" viewBox={`0 0 ${totalW} ${barH + 20}`}>
+              {segments.reduce((acc, seg, i) => {
+                const x = acc.x;
+                return { x: x + seg.px, els: [...acc.els,
+                  <g key={i}>
+                    <rect x={x} y={0} width={seg.px} height={barH} fill={seg.color} fillOpacity={0.25} stroke={seg.color} strokeWidth="1"/>
+                    <text x={x + seg.px/2} y={barH/2 + 4} textAnchor="middle" fontSize="8" fill={seg.color} fontWeight="bold">{seg.label} ({seg.w})</text>
+                    <text x={x} y={barH + 13} textAnchor="middle" fontSize="7" fill="#64748b">{i === 0 ? '' : cumsum[i-1]}</text>
+                  </g>
+                ]};
+              }, { x: 0, els: [] }).els}
+              <text x={totalW} y={barH + 13} textAnchor="middle" fontSize="7" fill="#64748b">10</text>
+              <text x={0} y={barH + 13} textAnchor="middle" fontSize="7" fill="#64748b">0</text>
+            </svg>
+          </div>
+          <p className="text-[10px] text-amber-400 font-mono text-center">Problem: we know widths, but not where each bin <em>starts</em> on the X-axis.</p>
+        </div>
+
+        {/* ─── STEP 1: cumsum ─── */}
+        <div className={`bg-slate-800/50 border border-amber-700/50 rounded-xl p-3 flex flex-col gap-2 transition-all duration-500 ${step >= 1 ? 'opacity-100' : 'opacity-30 pointer-events-none'}`}>
+          <div className="flex justify-between items-center">
+            <span className="text-[10px] font-bold text-amber-400 uppercase tracking-wider">Step 1 — torch.cumsum → running right-edges</span>
+            <span className="font-mono text-[10px] text-amber-300 bg-amber-900/30 px-2 py-0.5 rounded border border-amber-700">[2.0, 5.0, 10.0]</span>
+          </div>
+          <div className="grid grid-cols-3 gap-1 font-mono text-[10px]">
+            {widths.map((w, i) => (
+              <div key={i} className="flex flex-col items-center gap-0.5">
+                <div className="text-slate-500">{widths.slice(0, i+1).join(' + ')}</div>
+                <div className="text-amber-300 font-bold">= {cumsum[i]}</div>
+                <div className="text-slate-500 text-[8px]">right edge of {binLabels[i]}</div>
+              </div>
+            ))}
+          </div>
+          <p className="text-[10px] text-slate-400 leading-relaxed">
+            cumsum adds each value to all previous ones. Now <code className="text-amber-300">cumsum[i]</code> is the <strong className="text-amber-300">right-edge position</strong> of bin i.
+            We went from 3 sizes → 3 <em>right-edge coordinates</em>. Still 3 numbers, but their meaning changed.
+          </p>
+        </div>
+
+        {/* ─── STEP 2: F.pad ─── */}
+        <div className={`bg-slate-800/50 border border-fuchsia-700/50 rounded-xl p-3 flex flex-col gap-2 transition-all duration-500 ${step >= 2 ? 'opacity-100' : 'opacity-30 pointer-events-none'}`}>
+          <div className="flex justify-between items-center">
+            <span className="text-[10px] font-bold text-fuchsia-400 uppercase tracking-wider">Step 2 — F.pad(_, (1,0), value=0) → add left boundary</span>
+            <span className="font-mono text-[10px] text-fuchsia-300 bg-fuchsia-900/30 px-2 py-0.5 rounded border border-fuchsia-700">[0.0, 2.0, 5.0, 10.0]</span>
+          </div>
+          <p className="text-[10px] text-slate-400 leading-relaxed">
+            After cumsum we have right-edges but no left-edge for Bin 0. <code className="text-fuchsia-300">F.pad(_, (1,0))</code> prepends a <strong className="text-fuchsia-300">0.0</strong> at the front.
+            Now we have <strong className="text-fuchsia-300">K+1 = 4 boundary coordinates</strong> — one for each knot (left edge of Bin 0 through right edge of Bin 2).
+          </p>
+          <div className="flex gap-1 font-mono text-[10px] justify-center flex-wrap">
+            {padded.map((v, i) => (
+              <div key={i} className={`flex flex-col items-center gap-0.5 px-2 py-1 rounded border ${i === 0 ? 'border-fuchsia-500 bg-fuchsia-900/30 text-fuchsia-300' : 'border-slate-600 bg-slate-700/50 text-amber-300'}`}>
+                <span className="font-bold">{v.toFixed(1)}</span>
+                <span className="text-[7px] text-slate-500">{i === 0 ? '← padded' : i < padded.length - 1 ? `L of B${i}` : 'R of B2'}</span>
+              </div>
+            ))}
+          </div>
+          <p className="text-[10px] text-amber-400 font-mono text-center">3 sizes → 3 right-edges → <strong>4 boundary coordinates</strong> (K+1)</p>
+        </div>
+
+        {/* ─── STEP 3: map to [-5, 5] ─── */}
+        <div className={`bg-slate-800/50 border border-emerald-700/50 rounded-xl p-3 flex flex-col gap-2 transition-all duration-500 ${step >= 3 ? 'opacity-100' : 'opacity-30 pointer-events-none'}`}>
+          <div className="flex justify-between items-center">
+            <span className="text-[10px] font-bold text-emerald-400 uppercase tracking-wider">Step 3 — map [0,10] → [-5, 5]</span>
+            <span className="font-mono text-[10px] text-emerald-300 bg-emerald-900/30 px-2 py-0.5 rounded border border-emerald-700">[-5, -3, 0, 5]</span>
+          </div>
+          <p className="text-[10px] text-slate-400 leading-relaxed">
+            The formula <code className="text-emerald-300">(2·bound·cumW / cumW[-1]) − bound</code> linearly maps the range <code>[0, 10]</code> → <code>[-5, 5]</code>.
+            The first and last knots are then <strong className="text-emerald-300">pinned exactly</strong> to ±bound so tails attach cleanly.
+          </p>
+          <div className="overflow-hidden rounded">
+            <svg width="100%" viewBox={`0 0 ${totalW} ${barH + 20}`}>
+              {/* background bar */}
+              <rect x={0} y={0} width={totalW} height={barH} fill="#1e293b" rx="3"/>
+              {/* colored bins */}
+              {segments.reduce((acc, seg, i) => {
+                const x = acc.x;
+                return { x: x + seg.px, els: [...acc.els,
+                  <rect key={i} x={x} y={0} width={seg.px} height={barH} fill={seg.color} fillOpacity={0.2} stroke={seg.color} strokeWidth="1" />
+                ]};
+              }, { x: 0, els: [] }).els}
+              {/* mapped knot lines */}
+              {mappedPx.map((px, i) => (
+                <g key={i}>
+                  <line x1={px} y1={0} x2={px} y2={barH} stroke="#34d399" strokeWidth="1.5"/>
+                  <text x={px} y={barH + 13} textAnchor="middle" fontSize="8" fill="#34d399" fontWeight="bold">{mapped[i]}</text>
+                </g>
+              ))}
+              <text x={totalW/2} y={barH/2 + 4} textAnchor="middle" fontSize="8" fill="#94a3b8">X-axis knots</text>
+            </svg>
+          </div>
+        </div>
+
+        {/* ─── STEP 4: why D is different ─── */}
+        <div className={`bg-slate-800/50 border border-slate-600 rounded-xl p-3 flex flex-col gap-2 transition-all duration-500 ${step >= 4 ? 'opacity-100' : 'opacity-30 pointer-events-none'}`}>
+          <span className="text-[10px] font-bold text-slate-300 uppercase tracking-wider">Step 4 — Why D skips cumsum</span>
+          <p className="text-[10px] text-slate-400 leading-relaxed">
+            D (slopes) are already at the <strong className="text-white">boundary points</strong>, not inside bins. They don't need cumsum.
+            We just pad <code className="text-amber-300">1.0</code> at both ends: the linear tails outside the box must have slope = 1 to act as identity functions.
+            So D grows from K−1 = 2 → K+1 = 4 values, aligned with the 4 knots.
+          </p>
+          <div className="flex gap-1 justify-center font-mono text-[10px] flex-wrap">
+            {['1.0','0.8','1.2','0.9','1.0'].map((v, i) => (
+              <div key={i} className={`flex flex-col items-center px-2 py-1 rounded border ${i === 0 || i === 4 ? 'border-amber-500 bg-amber-900/30 text-amber-300' : 'border-slate-600 bg-slate-700/50 text-slate-300'}`}>
+                <span className="font-bold">{v}</span>
+                <span className="text-[7px] text-slate-500">{i === 0 ? '← pad' : i === 4 ? 'pad →' : `D${i-1}`}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Controls */}
+      <div className="flex-shrink-0 flex justify-center gap-4 py-3 border-t border-slate-700/60 bg-slate-900">
+        <VisualButton onClick={() => setStep(s => Math.max(0, s - 1))} active={false} disabled={step === 0 || isPlaying}>
+          <ChevronLeft size={14} /> Prev Step
+        </VisualButton>
+        <VisualButton onClick={() => setIsPlaying(!isPlaying)} active={isPlaying}>
+          {isPlaying ? <Pause size={14} /> : <Play size={14} />} {isPlaying ? "Pause" : "Play"}
         </VisualButton>
         <VisualButton onClick={() => setStep(s => Math.min(MAX_STEP, s + 1))} active={true} disabled={step === MAX_STEP || isPlaying}>
           Next Step <ChevronRight size={14} />
@@ -617,6 +1018,15 @@ const steps = [
     Visual: AnimatedResidualMLP
   },
   {
+    id: 'zeroinit',
+    title: '1b. Why Zero-Init Matters',
+    icon: Waves,
+    codeSnippet: `# WITHOUT zero-init (default PyTorch random weights):\n# final_layer outputs random logits, e.g.:\n#   W_logits = [2.3, -1.8, 4.1, ...]  <- random!\n#   softmax([2.3,-1.8,4.1]) = [0.18, 0.02, 0.80]\n# → one bin takes 80% of the box, two bins are tiny\n# → spline is wildly bent before ANY training\n# → loss = NaN on the very first forward pass 💥\n\n# WITH zero-init (our code):\nnn.init.zeros_(self.final_layer.weight)\nnn.init.zeros_(self.final_layer.bias)\n# final_layer outputs all zeros:\n#   W_logits = [0.0, 0.0, 0.0, 0.0]  <- flat\n#   softmax([0,0,0,0]) = [0.25, 0.25, 0.25, 0.25]\n# → all bins equal width → spline is a straight y=x line\n# → loss starts at a sensible value → training is stable ✓`,
+    description: "Zero-initialization of the final MLP layer forces ALL output logits to 0.0 at the start of training. Because softmax([0,0,...,0]) = uniform distribution, every spline bin starts equally sized. The resulting spline is a perfectly straight diagonal line — the identity function y=x. The model passes data through completely unchanged until training finds a reason to bend the curve.",
+    why: "Random PyTorch weights produce random logits. softmax of random logits creates unequal bin sizes. An unequal spline is bent. A bent spline on epoch 0 violently distorts every SCADA data point before a single gradient has been computed. The resulting loss is astronomically large or NaN, and the model never recovers.",
+    Visual: AnimatedZeroInit
+  },
+  {
     id: 'constraints',
     title: '2. Enforcing Math Constraints',
     icon: Activity,
@@ -633,6 +1043,15 @@ const steps = [
     description: "All three MLP outputs — W (bin widths), H (bin heights), and D (slopes) — are processed here. W and H each go through cumsum → pad → map to build the exact X-axis and Y-axis knot coordinates. D is simply padded with 1.0 at both ends to attach linear tails outside the box. Once the grid is built, torch.searchsorted does a fast binary search to find the bin, and torch.gather extracts W_k, H_k, D_0, and D_1 — the four values the algebra in Step 4 needs.",
     why: "W alone tells you where bins sit on the X-axis. H tells you where they sit on the Y-axis. Without H, you cannot compute the output coordinate or the straight-line slope S = H_k / W_k. Without D_0 and D_1, the spline curve has no smooth tangent constraints at the knot boundaries, breaking invertibility.",
     Visual: AnimatedScaffolding
+  },
+  {
+    id: 'cumsum',
+    title: '3b. Deep Dive: cumsum → pad → map',
+    icon: ArrowDown,
+    codeSnippet: `# STEP 1: cumsum converts bin SIZES → right-edge POSITIONS\n# W = [2.0, 3.0, 5.0]  (sizes — how wide each bin is)\ncumwidths = torch.cumsum(widths, dim=-1)\n# cumwidths = [2.0, 5.0, 10.0]  (right edges of each bin)\n\n# STEP 2: F.pad prepends 0.0 — adds the LEFT edge of Bin 0\n# (1,0) means "pad 1 on the left, 0 on the right"\ncumwidths = F.pad(cumwidths, (1, 0), value=0.0)\n# cumwidths = [0.0, 2.0, 5.0, 10.0]  ← now K+1 = 4 values\n#              ↑ new!  = left edge of Bin 0\n\n# STEP 3: map [0, 10] → [-bound, +bound]  e.g. [-5, 5]\ncumwidths = (bound * 2.0) * cumwidths / cumwidths[..., -1:] - bound\n# cumwidths = [-5.0, -3.0, 0.0, 5.0]  ← final X-knot positions\n\n# D is different — no cumsum, just pad with 1.0 at both ends:\n# D = [0.8, 1.2, 0.9]  →  [1.0, 0.8, 1.2, 0.9, 1.0]`,
+    description: "The MLP outputs bin SIZES (how wide/tall each bin is), not positions. cumsum converts sizes → right-edge positions. F.pad adds the missing left boundary (0). The map re-scales from [0,10] to [-5,5]. This gives K+1 knot coordinates from K bin sizes.",
+    why: "searchsorted needs absolute positions, not sizes. Without pad, Bin 0 has no left boundary. Without the map, knots live in [0,10] instead of the model's [-5,5] bounding box.",
+    Visual: AnimatedCumsumExplainer
   },
   {
     id: 'coupling',
