@@ -103,7 +103,7 @@ model:
   #   More bins = smoother, more flexible transformation between [-bound, +bound].
   #   Each bin adds 3 learned parameters per output dimension (width, height, slope).
   #   8 bins is standard; go to 12 for smoother tails if val loss plateaus early.
-  num_bins: 12
+  num_bins: 16
 
   # bound ── The spline is only defined inside [-bound, +bound].
   #   Values outside this range get the identity transform (no change).
@@ -112,7 +112,7 @@ model:
   #   the old bound=5.0, meaning the flow was silently doing nothing to them and
   #   the MultivariateNormal was scoring raw z-values of ±7 → catastrophic loss.
   #   bound=9.0 covers 99.9%+ of all samples and eliminates the out-of-bound spikes.
-  bound: 9.0
+  bound: 6.0
 
   # dropout_rate ── Probability of zeroing a neuron's activation during each
   #   ResidualMLP forward pass (only active during training, disabled at eval/sample).
