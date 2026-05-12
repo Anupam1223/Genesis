@@ -9,6 +9,8 @@ import FlowModelSection from './sections/FlowModelSection';
 import TrainingSection from './sections/TrainingSection';
 import TrainerSection from './sections/TrainerSection';
 import PipelineOverviewSection from './sections/PipelineOverviewSection';
+import PreprocessingMath from './sections/PreprocessingMath';
+
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('overview');
@@ -17,6 +19,7 @@ export default function App() {
     { id: 'overview', label: 'Pipeline Overview', icon: Network },
     { id: 'intro', label: 'Introduction', icon: Box },
     { id: 'preprocessing', label: 'Data Preprocessing', icon: Layers },
+    { id: 'preprocessing-math', label: 'Preprocessing Math', icon: Layers },
     { id: 'dataset', label: 'Dataset Interface', icon: Database },
     { id: 'components', label: 'Model Components', icon: Cpu },
     { id: 'flowmodel', label: 'Flow Model', icon: Zap },
@@ -62,6 +65,7 @@ export default function App() {
             {activeTab === 'overview' && <PipelineOverviewSection />}
             {activeTab === 'intro' && <IntroSection />}
             {activeTab === 'preprocessing' && <PreprocessingSection />}
+            {activeTab === 'preprocessing-math' && <PreprocessingMath />}
             {activeTab === 'dataset' && <DatasetSection />}
             {activeTab === 'components' && <ComponentSection />}
             {activeTab === 'flowmodel' && <FlowModelSection />}
