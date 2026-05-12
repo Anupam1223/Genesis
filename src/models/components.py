@@ -48,7 +48,7 @@ class ResidualMLP(nn.Module):
 # ==========================================
 def rational_quadratic_spline(inputs, unnormalized_widths, unnormalized_heights, 
                               unnormalized_derivatives, inverse=False, 
-                              bound=5.0, min_bin_width=1e-3, min_bin_height=1e-3, min_derivative=1e-3):
+                              bound=5.0, min_bin_width=1e-2, min_bin_height=1e-2, min_derivative=1e-2):
     """
     SLIDE 13 & 14: The Continuous Spline Math Engine.
     Transforms inputs -> outputs using the exact algebraic cheat codes.
@@ -169,7 +169,8 @@ class NeuralSplineCouplingLayer(nn.Module):
     The orchestrator for a single Spline Layer.
     Splits the array, runs the MLP, and calls the Math Engine.
     """
-    def __init__(self, dim_theta, dim_condition, hidden_dim=128, num_bins=8, bound=5.0):
+    def __init__(self, dim_theta, dim_condition, hidden_dim=128, num_bins=8, bound=5.0,
+                 mlp_layers=4, dropout_rate=0.1):
         super().__init__()
         
         self.half_dim = dim_theta // 2
@@ -183,7 +184,8 @@ class NeuralSplineCouplingLayer(nn.Module):
         self.params_per_dim = (3 * num_bins) - 1
         brain_output_dim = (dim_theta - self.half_dim) * self.params_per_dim
         
-        self.brain = ResidualMLP(brain_input_dim, hidden_dim, brain_output_dim)
+        self.brain = ResidualMLP(brain_input_dim, hidden_dim, brain_output_dim,
+                                  num_layers=mlp_layers, dropout_rate=dropout_rate)
 
     def forward(self, theta, condition):
         # 1. THE SPLIT

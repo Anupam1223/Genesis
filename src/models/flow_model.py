@@ -13,7 +13,8 @@ class PipelineConditionalFlow(nn.Module):
     The orchestrator. Stacks multiple Neural Spline coupling layers, handles 
     the array swapping between layers, and calculates the final Log-Likelihood Loss.
     """
-    def __init__(self, dim_theta, dim_condition, num_layers=6, hidden_dim=128, num_bins=8, bound=5.0):
+    def __init__(self, dim_theta, dim_condition, num_layers=6, hidden_dim=128, num_bins=8, bound=5.0,
+                 mlp_layers=4, dropout_rate=0.1):
         super().__init__()
         
         self.dim_theta = dim_theta
@@ -32,7 +33,9 @@ class PipelineConditionalFlow(nn.Module):
                 dim_condition=dim_condition, 
                 hidden_dim=hidden_dim,
                 num_bins=num_bins,
-                bound=bound
+                bound=bound,
+                mlp_layers=mlp_layers,
+                dropout_rate=dropout_rate,
             )
             for _ in range(num_layers)
         ])
@@ -74,10 +77,9 @@ class PipelineConditionalFlow(nn.Module):
         blueprint = self.get_blueprint()
         blueprint_score = blueprint.log_prob(z_final)
         
-        # 3. Total Loss Objective (Minimize to zero)
+        # 3. NLL objective — minimise negative log-likelihood
         loss = -1 * (blueprint_score + total_volume_penalty)
         
-        # Return the mean loss across the massive batch
         return loss.mean()
 
     def sample(self, num_samples, condition):

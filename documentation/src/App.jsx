@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Layers, Database, Box, Cpu, Zap, PlayCircle, GitMerge, Network } from 'lucide-react';
+import { Layers, Database, Box, Cpu, Zap, PlayCircle, GitMerge, Network, Settings } from 'lucide-react';
 
 import IntroSection from './sections/IntroSection';
 import PreprocessingSection from './sections/PreprocessingSection';
@@ -8,6 +8,7 @@ import ComponentSection from './sections/ComponentSection';
 import FlowModelSection from './sections/FlowModelSection';
 import TrainingSection from './sections/TrainingSection';
 import TrainerSection from './sections/TrainerSection';
+import HyperparamSection from './sections/HyperparamSection';
 import PipelineOverviewSection from './sections/PipelineOverviewSection';
 import PreprocessingMath from './sections/PreprocessingMath';
 
@@ -24,7 +25,8 @@ export default function App() {
     { id: 'components', label: 'Model Components', icon: Cpu },
     { id: 'flowmodel', label: 'Flow Model', icon: Zap },
     { id: 'training', label: 'Training Loop', icon: PlayCircle },
-    { id: 'trainer', label: 'SMPCTrainer', icon: GitMerge },
+    { id: 'trainer',     label: 'SMPCTrainer',        icon: GitMerge },
+    { id: 'hyperparams', label: 'Hyperparameter Ref', icon: Settings },
   ];
 
   return (
@@ -70,7 +72,8 @@ export default function App() {
             {activeTab === 'components' && <ComponentSection />}
             {activeTab === 'flowmodel' && <FlowModelSection />}
             {activeTab === 'training' && <TrainingSection />}
-            {activeTab === 'trainer' && <TrainerSection />}
+            {activeTab === 'trainer'     && <TrainerSection />}
+            {activeTab === 'hyperparams' && <HyperparamSection />}
           </main>
         </div>
       </div>

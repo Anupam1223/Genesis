@@ -1,0 +1,172 @@
+# =============================================================================
+# Genesis — Central Hyperparameter Configuration
+# =============================================================================
+# This is the SINGLE SOURCE OF TRUTH for every number in the training pipeline.
+# scripts/train.py reads every value from here at startup via yaml.safe_load().
+# No constant is hardcoded anywhere else — change a value here and it propagates
+# automatically to the model, optimizer, dataloader, and logger.
+# =============================================================================
+
+
+# -----------------------------------------------------------------------------
+# DATA
+# -----------------------------------------------------------------------------
+data:
+  # Root directory that contains train.parquet, val.parquet, test.parquet.
+  # These are produced by running:  python src/data/preprocessing.py
+  # The path is relative to the project root (where train.py is launched from).
+  path: "data/processed"
+
+
+# -----------------------------------------------------------------------------
+# TRAINING
+# -----------------------------------------------------------------------------
+training:
+  # epochs ── How many full passes over the entire training set to run.
+  #   More epochs give the model more chances to learn, but too many leads to
+  #   overfitting (train loss keeps falling while val loss starts rising).
+  #   ReduceLROnPlateau will halve the LR every `lr_scheduler_patience` epochs
+  #   with no val improvement, so you can afford to set this higher and let the
+  #   scheduler decide when to stop improving.
+  epochs: 60
+
+  # batch_size ── Number of samples processed in one forward+backward pass.
+  #   Larger batches = smoother gradient estimates but more VRAM per step.
+  #   4096 is safe on M4 Max 128 GB unified memory. Halve to 2048 if you see
+  #   MPS out-of-memory errors.
+  batch_size: 4096
+
+  # learning_rate ── Initial step size for AdamW.
+  #   Rational-Quadratic Spline Flows are more sensitive to LR than affine flows
+  #   because the spline knot positions are jointly optimised. 2e-4 is the safe
+  #   upper bound; anything above 5e-4 tends to produce NaN knot derivatives.
+  #   The scheduler will decay this automatically during training.
+  learning_rate: 5.0e-5
+
+  # grad_clip ── Maximum L2 norm of the gradient vector before it is rescaled.
+  #   If the global gradient norm exceeds this value, every parameter's gradient
+  #   is scaled down proportionally so the total norm equals grad_clip.
+  #   This prevents a single bad batch from blowing up the spline knots.
+  #   0.5 is tight — appropriate for a 6-layer, 256-dim model on real sensor data.
+  grad_clip: 1.0
+
+  # weight_decay ── AdamW L2 regularisation coefficient (applied to weights only,
+  #   NOT to biases or BatchNorm parameters — that's what makes AdamW different
+  #   from L2-penalised Adam). Keeps weights small, discourages memorisation.
+  #   Increased to 1e-3 to combat the overfitting observed: train→-15, val→+38.
+  weight_decay: 1.0e-2
+
+  # lr_scheduler_factor ── Multiplicative LR decay applied by ReduceLROnPlateau
+  #   when val_loss has not improved for `lr_scheduler_patience` epochs.
+  #   factor=0.5 means: new_lr = old_lr × 0.5  (halving).
+  lr_scheduler_factor: 0.5
+
+  # lr_scheduler_patience ── How many epochs of no val_loss improvement to
+  #   tolerate before triggering a LR reduction.
+  #   Reduced to 3: the LR should halve quickly after a plateau so the model
+  #   gets a recovery window BEFORE early stopping fires.
+  #   Rule: lr_scheduler_patience must always be < early_stopping_patience.
+  lr_scheduler_patience: 3
+
+  # lr_scheduler_min ── Hard floor on the learning rate.
+  #   The scheduler will never reduce LR below this value, preventing
+  #   the optimiser from effectively freezing on a plateau.
+  lr_scheduler_min: 1.0e-6
+
+  # early_stopping_patience ── Stop training if val_loss has not improved for
+  #   this many consecutive epochs. Saves compute and preserves the best model.
+  #   Set to 15 — significantly larger than lr_scheduler_patience (3).
+  #   This guarantees the LR halves at least TWICE (epochs +3, +6 after plateau)
+  #   giving the model two full recovery windows before we give up.
+  #   Timeline after a plateau: LR halves at +3, halves again at +6, stop at +15.
+  early_stopping_patience: 15
+
+
+# -----------------------------------------------------------------------------
+# MODEL  (Neural Spline Flow — Rational-Quadratic Coupling)
+# -----------------------------------------------------------------------------
+model:
+  # num_layers ── Number of NeuralSplineCouplingLayer blocks stacked in sequence.
+  #   Each layer sees the FULL condition vector and transforms half the theta dims.
+  #   Layers alternate which half they transform (via torch.flip between layers).
+  #   More layers = more expressive posterior, but slower forward/backward pass.
+  #   Reduced from 6 → 4 to reduce capacity and combat overfitting.
+  num_layers: 4
+
+  # hidden_dim ── Width (number of neurons) of every linear layer inside each
+  #   ResidualMLP "brain". All hidden layers share this width.
+  #   Reduced from 256 → 128. The 3-dim condition (x only) does not warrant a
+  #   very wide MLP — it cannot supply enough signal to justify 256 neurons.
+  hidden_dim: 128
+
+  # num_bins ── Number of knots (control points) in the Rational-Quadratic spline.
+  #   More bins = smoother, more flexible transformation between [-bound, +bound].
+  #   Each bin adds 3 learned parameters per output dimension (width, height, slope).
+  #   8 bins is standard; go to 12 for smoother tails if val loss plateaus early.
+  num_bins: 12
+
+  # bound ── The spline is only defined inside [-bound, +bound].
+  #   Values outside this range get the identity transform (no change).
+  #   Diagnostic showed max absolute PCA coefficient = 7.82 across all splits.
+  #   6.6% of train and 7.6% of val samples had at least one coefficient outside
+  #   the old bound=5.0, meaning the flow was silently doing nothing to them and
+  #   the MultivariateNormal was scoring raw z-values of ±7 → catastrophic loss.
+  #   bound=9.0 covers 99.9%+ of all samples and eliminates the out-of-bound spikes.
+  bound: 9.0
+
+  # dropout_rate ── Probability of zeroing a neuron's activation during each
+  #   ResidualMLP forward pass (only active during training, disabled at eval/sample).
+  #   Acts as a regulariser, forcing the MLP to not rely on any single neuron.
+  #   Increased from 0.1 → 0.2 to add stronger regularisation against overfitting.
+  dropout_rate: 0.2
+
+  # mlp_layers ── Depth (number of residual blocks) inside each coupling layer's
+  #   ResidualMLP. Each block is: Linear → GELU → Dropout → Linear + skip-connection.
+  #   More blocks = the MLP can learn more complex parameter functions, but training
+  #   Reduced from 4 → 2 to match the reduced hidden_dim. Two blocks is sufficient
+  #   depth for a 3-dim condition → 12-dim spline parameter function.
+  mlp_layers: 2
+
+
+# -----------------------------------------------------------------------------
+# DATALOADER  (Apple Silicon M4 Max optimised)
+# -----------------------------------------------------------------------------
+dataloader:
+  # num_workers ── Number of parallel CPU processes spawned to prefetch batches.
+  #   M4 Max has 14 performance cores. Leaving 2 free for the OS/MPS runtime
+  #   and using 12 for data loading achieves near-zero GPU idle time between batches.
+  #   Reduce to 4 on machines with fewer cores.
+  num_workers: 12
+
+  # prefetch_factor ── How many batches each worker pre-loads into RAM ahead of time.
+  #   prefetch_factor=4 means each of the 12 workers queues up 4 batches, so
+  #   48 batches are always ready. Safe with 128 GB unified memory.
+  #   Reduce to 2 if you see excessive RAM usage during startup.
+  prefetch_factor: 4
+
+  # persistent_workers ── If true, worker processes stay alive between epochs.
+  #   Without this, Python re-forks 12 processes at the start of every epoch
+  #   (~2s overhead per epoch). With this enabled, workers just block on the
+  #   queue between epochs — no re-spawn cost.
+  persistent_workers: true
+
+
+# -----------------------------------------------------------------------------
+# LOGGING & HARDWARE
+# -----------------------------------------------------------------------------
+logging:
+  # wandb ── Master switch for Weights & Biases experiment tracking.
+  #   true  → initialises a wandb run, logs train/val loss curves, LR, and model graph.
+  #   false → disables all wandb calls; useful for quick offline debug runs.
+  wandb: true
+
+  # wandb_project ── The W&B project name that runs are grouped under.
+  #   Visible at https://wandb.ai/<your-username>/smpc-spline-flow
+  wandb_project: "smpc-spline-flow"
+
+  # use_bf16 ── Enable bfloat16 autocast during training.
+  #   BF16 has the same exponent range as FP32 (no overflow risk) but half the
+  #   mantissa bits. On M4 Max MPS, torch.autocast with bfloat16 is currently
+  #   unstable for normalising flow log-det computations — leave false until
+  #   PyTorch MPS autocast matures. Safe to enable on CUDA A100/H100.
+  use_bf16: false

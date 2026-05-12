@@ -1,14 +1,21 @@
 import os
 import torch
+import numpy as np
+import matplotlib
+matplotlib.use('Agg')  # non-interactive backend — safe for background training loops
+import matplotlib.pyplot as plt
 from torch.optim import AdamW
 from tqdm import tqdm
 import wandb
 
 class SMPCTrainer:
-    def __init__(self, model, train_dataloader, val_dataloader, learning_rate=5e-4, epochs=50, device="mps", log_to_wandb=False, use_bf16=False):
+    def __init__(self, model, train_dataloader, val_dataloader,
+                 learning_rate=2e-4, epochs=20, device="mps", log_to_wandb=False,
+                 use_bf16=False, grad_clip=0.5, weight_decay=1e-4,
+                 lr_scheduler_factor=0.5, lr_scheduler_patience=3, lr_scheduler_min=1e-6,
+                 early_stopping_patience=8):
         # Move the model to the Apple Metal GPU (or CUDA)
         self.model = model.to(device)
-        # BF16: M4 Max supports bfloat16 natively via MPS — safe for splines (no NaN risk unlike FP16)
         self.use_bf16 = use_bf16 and device in ("mps", "cuda")
         self.dtype = torch.bfloat16 if self.use_bf16 else torch.float32
         self.train_dataloader = train_dataloader
@@ -16,15 +23,19 @@ class SMPCTrainer:
         self.epochs = epochs
         self.device = device
         self.log_to_wandb = log_to_wandb
-        
-        # AdamW is the industry standard optimizer. 
-        # Weight decay lowered to 1e-4 for Spline Flows (too high can break knot positioning!)
-        self.optimizer = AdamW(self.model.parameters(), lr=learning_rate, weight_decay=1e-4)
+        self.grad_clip = grad_clip
+        self.early_stopping_patience = early_stopping_patience
+        self._epochs_no_improve = 0
 
-        # ReduceLROnPlateau: Halves the LR when val_loss stops improving.
-        # Spline Flows are highly sensitive to LR; this stabilizes the jagged peak training.
+        # AdamW — weight decay lowered for Spline Flows (too high can break knot positioning)
+        self.optimizer = AdamW(self.model.parameters(), lr=learning_rate, weight_decay=weight_decay)
+
+        # ReduceLROnPlateau — all params driven from configs/train.yaml
         self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-            self.optimizer, mode='min', factor=0.5, patience=3, min_lr=1e-6
+            self.optimizer, mode='min',
+            factor=lr_scheduler_factor,
+            patience=lr_scheduler_patience,
+            min_lr=lr_scheduler_min
         )
         
         # Setup local checkpoint directory
@@ -63,19 +74,56 @@ class SMPCTrainer:
 
                 loss.backward()
                 
-                # Strict grad clipping — tightened to 0.5 for the larger model (512 dim, 10 layers)
-                # A bigger model accumulates larger raw gradients; 0.5 keeps spline knots stable
-                torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=0.5)
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=self.grad_clip)
                 self.optimizer.step()
                 
                 epoch_train_loss += loss.item()
                 pbar_train.set_postfix({"loss": f"{loss.item():.4f}"})
                 
-                # Only log every 50 steps to avoid network overhead.
+                # Log every 50 steps to avoid network overhead.
                 if self.log_to_wandb and global_step % 50 == 0:
-                    wandb.log({
-                        "train/batch_loss": loss.item()
-                    })
+                    log_dict = {"train/batch_loss": loss.item()}
+
+                    # ── Gradient flow figure ──────────────────────────────────────
+                    # Group all Linear layers by their parent coupling-layer index.
+                    # For each coupling layer build one subplot showing the min / max / avg
+                    # gradient magnitude across its Linear weights — one image in WandB
+                    # instead of 48 individual metric streams.
+                    layer_grads: dict[str, list[float]] = {}
+                    for name, module in self.model.named_modules():
+                        if not isinstance(module, torch.nn.Linear):
+                            continue
+                        if module.weight.grad is None:
+                            continue
+                        parts = name.split(".")  # e.g. ["layers","2","brain","layers","0","0"]
+                        if len(parts) >= 2 and parts[0] == "layers":
+                            group = f"Layer {parts[1]}"
+                        else:
+                            group = name
+                        layer_grads.setdefault(group, []).append(
+                            module.weight.grad.abs().mean().item()
+                        )
+
+                    if layer_grads:
+                        groups  = sorted(layer_grads.keys())
+                        indices = list(range(len(groups)))
+                        mins    = [min(layer_grads[g])  for g in groups]
+                        maxs    = [max(layer_grads[g])  for g in groups]
+                        avgs    = [sum(layer_grads[g]) / len(layer_grads[g]) for g in groups]
+
+                        fig, ax = plt.subplots(figsize=(max(6, len(groups) * 1.2), 4))
+                        ax.fill_between(indices, mins, maxs, alpha=0.25, label="Min–Max range")
+                        ax.plot(indices, avgs, marker="o", linewidth=1.5, label="Avg |grad|")
+                        ax.set_xticks(indices)
+                        ax.set_xticklabels(groups, rotation=30, ha="right", fontsize=8)
+                        ax.set_ylabel("|grad| (mean abs)")
+                        ax.set_title(f"Gradient Flow — Step {global_step}")
+                        ax.legend(fontsize=8)
+                        fig.tight_layout()
+                        log_dict["grad/flow"] = wandb.Image(fig)
+                        plt.close(fig)
+
+                    wandb.log(log_dict)
                 
                 global_step += 1
             
@@ -103,9 +151,16 @@ class SMPCTrainer:
                 self.best_val_loss = avg_val_loss
                 self.save_checkpoint(epoch, avg_train_loss, avg_val_loss, is_best=True)
                 print(f"   🌟 New best model saved! (Val Loss: {avg_val_loss:.4f})")
+                self._epochs_no_improve = 0
+            else:
+                self._epochs_no_improve += 1
+                print(f"   ⏳ No val improvement for {self._epochs_no_improve}/{self.early_stopping_patience} epochs.")
+                if self._epochs_no_improve >= self.early_stopping_patience:
+                    print(f"\n⏹  Early stopping triggered at epoch {epoch}. Best val loss: {self.best_val_loss:.4f}")
+                    break
                 
             # Save regular checkpoint every 10 epochs
-            elif epoch % 10 == 0:
+            if epoch % 10 == 0:
                 self.save_checkpoint(epoch, avg_train_loss, avg_val_loss)
                 
         print("\n✅ Training Complete!")

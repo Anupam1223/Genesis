@@ -1,6 +1,7 @@
 import os
 import sys
 import torch
+import yaml
 from torch.utils.data import DataLoader
 import wandb
 
@@ -15,93 +16,91 @@ from src.training.trainer import SMPCTrainer
 
 def main():
     # ==========================================
-    # --- CONFIGURATION ---
+    # --- LOAD CONFIG FROM YAML ---
+    # All hyperparameters live in configs/train.yaml
+    # Edit that file — nothing needs to change here.
     # ==========================================
-    DATA_PATH = "data/processed" # Directory containing your train/val/test parquets
-    
-    # Training Hyperparameters — tuned for M4 Max (128GB unified memory)
-    BATCH_SIZE = 4096      # M4 Max can handle 4x larger batches — better GPU utilization
-    EPOCHS = 50
-    LEARNING_RATE = 2e-4   # LOWERED: larger model (512 dim, 10 layers) needs a smaller LR to stay stable
-    LOG_WANDB = True
-    USE_BF16 = False       # DISABLED: torch.autocast is not stable on MPS backend — causes NaN gradients
-    
-    # Phase III Neural Spline Flow Architecture — balanced for M4 Max + dataset size
-    NUM_LAYERS = 6         # Reduced from 10: prevents overfitting on ~720k samples
-    HIDDEN_DIM = 256       # Reduced from 512: better generalisation, still expressive
-    NUM_BINS = 12          # Increased from 8: finer-grained spline segments
-    BOUND = 5.0            # SPLINE: The boundary constraint [-5.0, 5.0] matching RobustScaler
-    # ==========================================
-    
+    config_path = os.path.join(os.path.dirname(__file__), '..', 'configs', 'train.yaml')
+    with open(config_path, 'r') as f:
+        cfg = yaml.safe_load(f)
+
+    # Unpack config sections for readability
+    data_cfg   = cfg['data']
+    train_cfg  = cfg['training']
+    model_cfg  = cfg['model']
+    dl_cfg     = cfg['dataloader']
+    log_cfg    = cfg['logging']
+
     # Enable Apple Silicon Acceleration natively
     device = "mps" if torch.backends.mps.is_available() else "cuda" if torch.cuda.is_available() else "cpu"
 
-    if LOG_WANDB:
+    if log_cfg['wandb']:
         wandb.init(
-            project="smpc-spline-flow", 
+            project=log_cfg['wandb_project'],
             config={
-                "epochs": EPOCHS, 
-                "batch_size": BATCH_SIZE, 
-                "lr": LEARNING_RATE, 
+                **train_cfg,
+                **model_cfg,
                 "device": device,
-                "num_bins": NUM_BINS,
-                "bound": BOUND,
-                "num_layers": NUM_LAYERS,
-                "hidden_dim": HIDDEN_DIM,
-                "use_bf16": USE_BF16
             }
         )
 
     # 1. Load the Datasets (Train, Val, Test Splits)
     print("📦 Initializing Datasets...")
-    train_dataset = SCADAPipelineDataset(data_path=DATA_PATH, split='train', log_to_wandb=LOG_WANDB)
-    val_dataset = SCADAPipelineDataset(data_path=DATA_PATH, split='val', log_to_wandb=False)
-    test_dataset = SCADAPipelineDataset(data_path=DATA_PATH, split='test', log_to_wandb=False)
-    
-    # Optimized DataLoader settings for M4 Max (14-core CPU, 128GB RAM)
+    train_dataset = SCADAPipelineDataset(data_path=data_cfg['path'], split='train', log_to_wandb=log_cfg['wandb'])
+    val_dataset   = SCADAPipelineDataset(data_path=data_cfg['path'], split='val',   log_to_wandb=False)
+    test_dataset  = SCADAPipelineDataset(data_path=data_cfg['path'], split='test',  log_to_wandb=False)
+
     dataloader_kwargs = {
-        "batch_size": BATCH_SIZE,
-        "num_workers": 12,          # M4 Max has 14 CPU cores; use 12 for data pipeline
-        "persistent_workers": True,
-        "prefetch_factor": 4,       # Buffer more batches — 128GB RAM means no pressure
-        "pin_memory": device == "cuda"  # pin_memory is not supported on MPS
+        "batch_size":         train_cfg['batch_size'],
+        "num_workers":        dl_cfg['num_workers'],
+        "persistent_workers": dl_cfg['persistent_workers'],
+        "prefetch_factor":    dl_cfg['prefetch_factor'],
+        "pin_memory":         device == "cuda",   # pin_memory not supported on MPS
     }
 
-    train_dataloader = DataLoader(train_dataset, shuffle=True, **dataloader_kwargs)
-    val_dataloader = DataLoader(val_dataset, shuffle=False, **dataloader_kwargs)
-    test_dataloader = DataLoader(test_dataset, shuffle=False, **dataloader_kwargs)
+    train_dataloader = DataLoader(train_dataset, shuffle=True,  **dataloader_kwargs)
+    val_dataloader   = DataLoader(val_dataset,   shuffle=False, **dataloader_kwargs)
+    test_dataloader  = DataLoader(test_dataset,  shuffle=False, **dataloader_kwargs)
 
-    # 2. Dynamically size the Neural Network based on the data
-    sample = train_dataset[0]
-    dim_theta = sample['theta'].shape[0]
+    # 2. Dynamically size the model from the data
+    sample        = train_dataset[0]
+    dim_theta     = sample['theta'].shape[0]
     dim_condition = sample['condition'].shape[0]
 
-    # 3. Build the Normalizing Flow (Phase III Splines)
-    print(f"🧠 Building Neural Spline Flow (Theta: {dim_theta}, Cond: {dim_condition}, Bins: {NUM_BINS})...")
+    # 3. Build the Normalizing Flow
+    print(f"🧠 Building Neural Spline Flow (Theta: {dim_theta}, Cond: {dim_condition}, Bins: {model_cfg['num_bins']})...")
     model = PipelineConditionalFlow(
-        dim_theta=dim_theta, 
-        dim_condition=dim_condition, 
-        num_layers=NUM_LAYERS,
-        hidden_dim=HIDDEN_DIM,
-        num_bins=NUM_BINS,
-        bound=BOUND
+        dim_theta=dim_theta,
+        dim_condition=dim_condition,
+        num_layers=model_cfg['num_layers'],
+        hidden_dim=model_cfg['hidden_dim'],
+        num_bins=model_cfg['num_bins'],
+        bound=model_cfg['bound'],
+        mlp_layers=model_cfg['mlp_layers'],
+        dropout_rate=model_cfg['dropout_rate'],
     )
 
     # 4. Ignite the Training Loop
     trainer = SMPCTrainer(
-        model=model, 
-        train_dataloader=train_dataloader, 
+        model=model,
+        train_dataloader=train_dataloader,
         val_dataloader=val_dataloader,
-        learning_rate=LEARNING_RATE, 
-        epochs=EPOCHS, 
+        learning_rate=train_cfg['learning_rate'],
+        epochs=train_cfg['epochs'],
         device=device,
-        log_to_wandb=LOG_WANDB,
-        use_bf16=USE_BF16
+        log_to_wandb=log_cfg['wandb'],
+        use_bf16=log_cfg['use_bf16'],
+        grad_clip=train_cfg['grad_clip'],
+        weight_decay=train_cfg['weight_decay'],
+        lr_scheduler_factor=train_cfg['lr_scheduler_factor'],
+        lr_scheduler_patience=train_cfg['lr_scheduler_patience'],
+        lr_scheduler_min=train_cfg['lr_scheduler_min'],
+        early_stopping_patience=train_cfg['early_stopping_patience'],
     )
-    
+
     trainer.train()
-    
-    if LOG_WANDB:
+
+    if log_cfg['wandb']:
         wandb.finish()
 
 if __name__ == "__main__":
