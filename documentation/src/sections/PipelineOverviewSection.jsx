@@ -480,14 +480,18 @@ const AnimatedPreprocessing = () => {
         </div>
 
         {/* Shape visual */}
-        <div className="w-full max-w-lg mx-auto bg-slate-800 border border-slate-700 rounded-xl p-4 min-h-[120px] animate-in fade-in duration-200" key={phase}>
-          {stages[phase].shape}
+        <div className="w-full max-w-lg mx-auto bg-slate-800 border border-slate-700 rounded-xl p-4 min-h-[120px]">
+          <div key={phase} className="transition-opacity duration-200">
+            {stages[phase].shape}
+          </div>
         </div>
 
         {/* Description */}
-        <p className="text-[11px] text-slate-300 leading-relaxed px-2 max-w-lg mx-auto bg-slate-800/50 border border-slate-700 rounded-xl p-3">
-          {stages[phase].desc}
-        </p>
+        <div className="w-full max-w-lg mx-auto bg-slate-800/50 border border-slate-700 rounded-xl p-3 flex-shrink-0">
+          <p key={`desc-${phase}`} className="text-[11px] text-slate-300 leading-relaxed">
+            {stages[phase].desc}
+          </p>
+        </div>
       </div>
 
       <div className="flex-shrink-0 flex justify-center gap-3 py-3 border-t border-slate-700/60 bg-slate-900">
@@ -708,17 +712,19 @@ const AnimatedEpochLoop = () => {
             <div className="flex items-center gap-1"><div className="w-3 h-1 bg-blue-400 rounded"></div><span className="text-slate-400">train_loss</span></div>
             <div className="flex items-center gap-1"><div className="w-3 h-1 bg-rose-400 rounded"></div><span className="text-slate-400">val_loss</span></div>
           </div>
-          <svg width="100%" viewBox={`0 0 ${chartW} ${chartH}`} className="overflow-visible">
-            {[0.25,0.5,0.75,1].map(f => (
-              <line key={f} x1="0" y1={chartH*(1-f)} x2={chartW} y2={chartH*(1-f)} stroke="#334155" strokeWidth="0.5" strokeDasharray="3" />
-            ))}
-            {history.length > 1 && <polyline points={trainPts} fill="none" stroke="#60a5fa" strokeWidth="1.5" />}
-            {history.length > 1 && <polyline points={valPts} fill="none" stroke="#fb7185" strokeWidth="1.5" />}
-            {best && history.length > 1 && (() => {
-              const x = ((best.e - 1) / (MAX_EPOCH - 1)) * chartW;
-              return <line x1={x} y1={0} x2={x} y2={chartH} stroke="#34d399" strokeWidth="1" strokeDasharray="3" />;
-            })()}
-          </svg>
+          <div className="overflow-hidden rounded">
+            <svg width="100%" viewBox={`-2 -4 ${chartW + 4} ${chartH + 6}`}>
+              {[0.25,0.5,0.75,1].map(f => (
+                <line key={f} x1="0" y1={chartH*(1-f)} x2={chartW} y2={chartH*(1-f)} stroke="#334155" strokeWidth="0.5" strokeDasharray="3" />
+              ))}
+              {history.length > 1 && <polyline points={trainPts} fill="none" stroke="#60a5fa" strokeWidth="1.5" />}
+              {history.length > 1 && <polyline points={valPts} fill="none" stroke="#fb7185" strokeWidth="1.5" />}
+              {best && history.length > 1 && (() => {
+                const x = ((best.e - 1) / (MAX_EPOCH - 1)) * chartW;
+                return <line x1={x} y1={0} x2={x} y2={chartH} stroke="#34d399" strokeWidth="1" strokeDasharray="3" />;
+              })()}
+            </svg>
+          </div>
         </div>
 
         {/* Epoch cycle breakdown */}
