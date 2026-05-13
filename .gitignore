@@ -15,6 +15,10 @@ data/processed/*
 !data/raw/.gitkeep
 !data/processed/.gitkeep
 
+# Excel temp lock files (created when file is open in Excel)
+~$*.xlsx
+~$*.xls
+
 # Local Artifacts & Outputs
 outputs/
 wandb/
@@ -27,3 +31,12 @@ wandb/
 .vscode/
 .DS_Store
 *.swp
+
+# Jupyter Notebooks
+.ipynb_checkpoints/
+notebooks/.ipynb_checkpoints/
+
+# Frontend (documentation React app)
+documentation/node_modules/
+documentation/dist/
+documentation/.vite/

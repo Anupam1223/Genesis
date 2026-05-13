@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from torch.distributions import MultivariateNormal
+from torch.distributions import Independent, Normal
 
 # IMPORTANT: We are now importing the Neural Spline layer instead of Affine
 from .components import ResidualMLP, NeuralSplineCouplingLayer
@@ -23,7 +23,7 @@ class PipelineConditionalFlow(nn.Module):
         # Define the pre-chosen Blueprint (Standard Normal Bell Curve: N(0, 1))
         # We do this here so it lives on the correct hardware device (CPU/GPU/MPS)
         self.register_buffer('blueprint_loc', torch.zeros(dim_theta))
-        self.register_buffer('blueprint_cov', torch.eye(dim_theta))
+        # blueprint_cov removed — using Independent(Normal) which needs no Cholesky
         
         # Stack multiple Neural Spline Coupling Layers
         # We pass down the specific Spline hyperparameters (num_bins, bound)
@@ -41,8 +41,13 @@ class PipelineConditionalFlow(nn.Module):
         ])
 
     def get_blueprint(self):
-        """Returns the continuous Bell Curve distribution for grading."""
-        return MultivariateNormal(self.blueprint_loc, self.blueprint_cov)
+        """Returns the standard Normal distribution for grading. Uses Independent(Normal)
+        instead of MultivariateNormal to avoid linalg_cholesky_ex which is not
+        implemented on all MPS versions."""
+        return Independent(
+            Normal(self.blueprint_loc, torch.ones_like(self.blueprint_loc)),
+            reinterpreted_batch_ndims=1
+        )
 
     def forward(self, theta, condition):
         """
