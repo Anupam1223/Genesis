@@ -1,0 +1,55 @@
+program: HPO/hpo_train.py
+method: bayes
+metric:
+  name: val/epoch_loss
+  goal: minimize
+parameters:
+  # ==========================================
+  # 1. MACRO ARCHITECTURE (Spline Flow)
+  # ==========================================
+  num_layers:
+    values: [4, 6, 8, 10]
+  num_bins:
+    values: [4, 8, 12, 16]
+  bound:
+    values: [3.0, 5.0, 8.0]
+    
+  # ==========================================
+  # 2. MICRO ARCHITECTURE (Brain MLPs)
+  # ==========================================
+  hidden_dim:
+    values: [64, 128, 256]
+  mlp_layers:
+    values: [2, 3, 4, 6]
+  dropout_rate:
+    values: [0.0, 0.1, 0.2, 0.3]
+  # Future-proofing: In case you add an activation parameter later
+  activation_fn:
+    values: ["gelu", "relu",'tanh']
+    
+  # ==========================================
+  # 3. OPTIMIZATION & TRAINING DYNAMICS
+  # ==========================================
+  # Future-proofing: In case you parameterize the optimizer
+  optimizer_name:
+    values: ["AdamW", "Adam"]
+  learning_rate:
+    distribution: log_uniform_values
+    min: 0.00001
+    max: 0.01
+  weight_decay:
+    distribution: log_uniform_values
+    min: 0.00001
+    max: 0.1
+  grad_clip:
+    values: [0.5, 1.0, 2.0, 3.0]
+    
+  # ==========================================
+  # 4. SCHEDULING
+  # ==========================================
+  lr_scheduler_factor:
+    values: [0.2, 0.5, 0.8]
+  lr_scheduler_patience:
+    values: [2, 3, 5]
+  early_stopping_patience:
+    values: [8, 10, 15]

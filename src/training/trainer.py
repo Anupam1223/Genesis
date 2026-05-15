@@ -72,6 +72,14 @@ class SMPCTrainer:
                                     dtype=self.dtype, enabled=self.use_bf16):
                     loss = self.model.compute_loss(theta, condition)
 
+                # Skip batch if loss is non-finite — can happen with extreme HPO configs.
+                # Logging it lets W&B mark this run as degraded without crashing the agent.
+                if not torch.isfinite(loss):
+                    print(f"   ⚠️  Non-finite loss ({loss.item():.2f}) at step {global_step} — skipping batch.")
+                    self.optimizer.zero_grad()
+                    global_step += 1
+                    continue
+
                 loss.backward()
                 
                 torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=self.grad_clip)

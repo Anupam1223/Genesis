@@ -14,6 +14,9 @@ Panels generated
 6.  Coverage calibration chart     — % true values inside k-sigma predicted intervals for k=1..3
 7.  Condition–NLL heatmap          — does loss vary with operating point (suction pressure × drum temp)?
 8.  Sample diversity strip         — 50 draws from the same condition, shows predicted spread
+9.  Marginal histograms            — true test distribution vs model-sampled density, per PC
+10. Sampled 4-hour trajectories    — 100 flow samples decoded back to physical sensor time-series
+                                     plotted as shaded confidence band vs actual history
 """
 
 import os
@@ -21,10 +24,12 @@ import sys
 import yaml
 import torch
 import numpy as np
+import joblib
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from scipy import stats
+from scipy.stats import gaussian_kde
 from torch.utils.data import DataLoader
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
@@ -49,6 +54,21 @@ IMAGE_DIR = "outputs/images"
 os.makedirs(IMAGE_DIR, exist_ok=True)
 
 PC_NAMES = [f"PC{i+1:02d}" for i in range(12)]
+
+THETA_SENSOR_NAMES = [
+    "Seal Gas Filter DP",
+    "Lube Oil Level",
+    "Thermal Cycle Efficiency",
+    "Isentropic Efficiency",
+    "Discharge Pressure",
+    "Discharge Temp",
+    "Exhaust Temp Spread",
+    "Turbine Heat Rate",
+]
+
+CHECKPOINT_DIR = "outputs/checkpoints"
+WINDOW_SIZE    = 14400   # seconds — 4-hour window used in preprocessing
+DOWNSAMPLE     = 60      # 1-minute intervals after downsampling
 
 # ─────────────────────────────────────────────────────────────────────────────
 def load_config():
@@ -284,6 +304,199 @@ def panel_sample_diversity(model, dataset, device, n_draws=50):
     print(f"  [8] Sample diversity     → {path}")
 
 # ─────────────────────────────────────────────────────────────────────────────
+@torch.no_grad()
+def panel_marginal_histograms(model, dataset, device, n_draws=5000):
+    """
+    Panel 9 — Marginal Histograms.
+
+    For each of the 12 PCA coefficients we plot two things on the same axis:
+      • BLUE bars  — the true distribution of that coefficient across the entire
+                     test set (what the real data looks like)
+      • ORANGE KDE — the density curve produced by sampling 5,000 times from the
+                     model using random test conditions
+
+    If the model has learned the data distribution well, the orange curve should
+    closely hug the blue histogram for every PC.  A wide gap means the model is
+    generating coefficients with the wrong range or shape for that PC.
+    """
+    # Collect all true theta values from the test set
+    all_true = dataset.theta_tensor.numpy()   # (N, 12)
+
+    # Sample from the model using a random subset of test conditions
+    rng  = np.random.default_rng(3)
+    idxs = rng.choice(len(dataset), size=n_draws, replace=False)
+    conds = torch.stack([dataset[int(i)]["condition"] for i in idxs]).to(device)
+    samples = model.sample(num_samples=n_draws, condition=conds).cpu().numpy()  # (n_draws, 12)
+
+    cols = 4
+    rows = 3
+    fig, axes = plt.subplots(rows, cols, figsize=(16, 10))
+    axes = axes.flatten()
+
+    for i in range(12):
+        ax = axes[i]
+        lo = min(all_true[:, i].min(), samples[:, i].min())
+        hi = max(all_true[:, i].max(), samples[:, i].max())
+        bins = np.linspace(lo, hi, 60)
+
+        # True distribution (histogram, normalised to density)
+        ax.hist(all_true[:, i], bins=bins, density=True,
+                color=PALETTE[0], alpha=0.5, edgecolor="none", label="True (test set)")
+
+        # Model-sampled distribution (smooth KDE curve)
+        kde = gaussian_kde(samples[:, i])
+        xs  = np.linspace(lo, hi, 300)
+        ax.plot(xs, kde(xs), color=PALETTE[1], lw=2, label="Model samples")
+
+        ax.set_title(PC_NAMES[i], fontsize=9, pad=4)
+        ax.set_xlabel("Coefficient value (scaled)", fontsize=7)
+        ax.set_ylabel("Density", fontsize=7)
+        ax.tick_params(labelsize=6)
+        # Legend only on first subplot to avoid clutter
+        if i == 0:
+            ax.legend(fontsize=7, loc="upper right")
+
+    fig.suptitle(
+        "Panel 9 — Marginal Histograms\n"
+        "Blue = true test distribution  |  Orange = model-generated density\n"
+        "Overlap means the model reproduces the right range and shape for each PC",
+        fontsize=10, y=1.01
+    )
+    path = os.path.join(IMAGE_DIR, "p9_marginal_histograms.png")
+    fig.tight_layout()
+    fig.savefig(path, bbox_inches="tight")
+    plt.close(fig)
+    print(f"  [9] Marginal histograms  → {path}")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+@torch.no_grad()
+def panel_sampled_trajectories(model, dataset, device, n_draws=100, n_windows=3):
+    """
+    Panel 10 — Sampled 4-Hour Trajectories.
+
+    This is the most physically meaningful panel.  It shows what the model
+    actually produces in sensor-space (not PCA-space).
+
+    Pipeline:
+      1. Pick a random test window (a real 4-hour historical period).
+      2. Feed its measured-now condition x into the flow 100 times →
+         100 different sampled theta coefficient vectors.
+      3. Decode each theta vector back to physical sensor units by reversing
+         the full preprocessing chain:
+             scaled coefficients
+             → inverse StandardScaler (pca_coeff_scaler)
+             → inverse PCA            (trajectory_pca_model)
+             → reshape to (240 timesteps × 8 sensors)
+             → inverse RobustScaler   (theta_base_scaler)
+      4. Plot the 100 reconstructed trajectories as a shaded 5–95 % confidence
+         band (light colour) and the median trajectory (solid line).
+      5. Overlay the actual historical 4-hour sensor trace (black dashed).
+
+    What you are looking at:
+      • The BLACK dashed line  = what the sensors actually recorded.
+      • The COLOURED band      = the range of futures the model considers
+                                 plausible given the current operating state.
+      • If the black line sits INSIDE the band → model is well-calibrated.
+      • If the band is VERY WIDE  → model is uncertain (expected early in training).
+      • If the band MISSES the black line → model is biased or miscalibrated.
+    """
+    # ── Load inverse-transform artefacts saved by preprocessing ──────────────
+    pca         = joblib.load(os.path.join(CHECKPOINT_DIR, "trajectory_pca_model.pkl"))
+    coeff_scaler = joblib.load(os.path.join(CHECKPOINT_DIR, "pca_coeff_scaler.pkl"))
+    base_scaler  = joblib.load(os.path.join(CHECKPOINT_DIR, "theta_base_scaler.pkl"))
+
+    n_sensors    = len(THETA_SENSOR_NAMES)          # 8
+    n_timesteps  = WINDOW_SIZE // DOWNSAMPLE        # 240  (one point per minute)
+    time_axis    = np.arange(n_timesteps) / 60.0    # hours (0 → 4)
+
+    rng  = np.random.default_rng(5)
+    idxs = rng.choice(len(dataset), size=n_windows, replace=False)
+
+    fig, axes = plt.subplots(n_windows, n_sensors,
+                             figsize=(n_sensors * 3, n_windows * 3.5))
+    if n_windows == 1:
+        axes = axes[np.newaxis, :]   # ensure 2D indexing
+
+    for row, idx in enumerate(idxs):
+        sample   = dataset[int(idx)]
+        true_pca = sample["theta"].numpy()          # (12,) — scaled PCA coeffs
+        cond     = sample["condition"].unsqueeze(0).repeat(n_draws, 1).to(device)
+
+        # ── Sample 100 theta vectors from the flow ────────────────────────────
+        sampled_pca_scaled = model.sample(
+            num_samples=n_draws, condition=cond
+        ).cpu().numpy()                              # (100, 12)
+
+        # ── Decode samples: scaled PCA → physical sensor trajectories ─────────
+        # Step 1 — undo StandardScaler on PCA coefficients
+        sampled_pca = coeff_scaler.inverse_transform(sampled_pca_scaled)   # (100, 12)
+        true_pca_unscaled = coeff_scaler.inverse_transform(true_pca[np.newaxis])[0]
+
+        # Step 2 — inverse PCA projection → (n_draws, 240*8) flattened windows
+        # (n_draws, 12) @ (12, 1920) + (1920,) = (n_draws, 1920)
+        sampled_flat = sampled_pca @ pca.components_ + pca.mean_
+        true_flat    = (true_pca_unscaled[np.newaxis] @ pca.components_) + pca.mean_
+
+        # Step 3 — reshape to (100, 240, 8)
+        sampled_windows = sampled_flat.reshape(n_draws,   n_timesteps, n_sensors)
+        true_window     = true_flat.reshape(1, n_timesteps, n_sensors)[0]
+
+        # Step 4 — undo RobustScaler on each sensor column
+        #          RobustScaler operates per-column; we apply it timestep-by-timestep
+        for t in range(n_timesteps):
+            sampled_windows[:, t, :] = base_scaler.inverse_transform(
+                sampled_windows[:, t, :]
+            )
+            if t == 0:
+                true_window[t] = base_scaler.inverse_transform(
+                    true_window[t][np.newaxis]
+                )[0]
+        # Undo remaining true timesteps
+        true_phys = np.stack([
+            base_scaler.inverse_transform(true_window[t][np.newaxis])[0]
+            for t in range(n_timesteps)
+        ])                                           # (240, 8)
+
+        # ── Plot ──────────────────────────────────────────────────────────────
+        p5  = np.percentile(sampled_windows, 5,  axis=0)   # (240, 8)
+        p50 = np.percentile(sampled_windows, 50, axis=0)
+        p95 = np.percentile(sampled_windows, 95, axis=0)
+
+        for col in range(n_sensors):
+            ax = axes[row][col]
+            ax.fill_between(time_axis, p5[:, col], p95[:, col],
+                            alpha=0.25, color=PALETTE[col],
+                            label="5–95% predicted range")
+            ax.plot(time_axis, p50[:, col],
+                    color=PALETTE[col], lw=1.5, label="Predicted median")
+            ax.plot(time_axis, true_phys[:, col],
+                    color="black", lw=1.5, linestyle="--", label="Actual")
+
+            if row == 0:
+                ax.set_title(THETA_SENSOR_NAMES[col], fontsize=8, pad=4)
+            if col == 0:
+                ax.set_ylabel(f"Window {idx}\n(physical units)", fontsize=7)
+            if row == n_windows - 1:
+                ax.set_xlabel("Hours ahead", fontsize=7)
+            ax.tick_params(labelsize=6)
+            if row == 0 and col == 0:
+                ax.legend(fontsize=6, loc="upper right")
+
+    fig.suptitle(
+        "Panel 10 — Sampled 4-Hour Sensor Trajectories\n"
+        "Shaded band = 5–95% of 100 flow samples  |  Black dashed = actual history\n"
+        "Band containing the black line = model is well-calibrated for that sensor",
+        fontsize=10, y=1.01
+    )
+    path = os.path.join(IMAGE_DIR, "p10_sampled_trajectories.png")
+    fig.tight_layout()
+    fig.savefig(path, bbox_inches="tight")
+    plt.close(fig)
+    print(f"  [10] Sampled trajectories → {path}")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 def summary_table(mean_nll, median_nll, mae):
     print("\n" + "═" * 52)
     print("  EVALUATION SUMMARY")
@@ -311,7 +524,7 @@ def main():
     )
     test_loader = DataLoader(
         test_dataset, batch_size=2048, shuffle=False,
-        num_workers=4, persistent_workers=True,
+        num_workers=0,   # MPS + macOS: shared-memory spawn crashes with num_workers > 0
     )
 
     sample0 = test_dataset[0]
@@ -333,6 +546,8 @@ def main():
     panel_coverage_calibration(model, test_dataset, device)
     panel_nll_heatmap(nll, cond)
     panel_sample_diversity(model, test_dataset, device)
+    panel_marginal_histograms(model, test_dataset, device)
+    panel_sampled_trajectories(model, test_dataset, device)
 
     summary_table(mean_nll, median_nll, mae)
     print(f"✅ All panels saved to  {IMAGE_DIR}/\n")

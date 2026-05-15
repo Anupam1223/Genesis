@@ -78,12 +78,20 @@ class PipelineConditionalFlow(nn.Module):
         # 1. Run the entire forward relay race through the Splines
         z_final, total_volume_penalty = self.forward(theta, condition)
         
+        # Guard: certain HPO configs (large bound + high lr) can push z_final to NaN.
+        # Return a large finite penalty instead of crashing the run entirely.
+        if torch.isnan(z_final).any() or torch.isinf(z_final).any():
+            return torch.tensor(1e4, device=theta.device, dtype=theta.dtype, requires_grad=True)
+        
         # 2. Evaluate Blueprint Score (Is Z_final landing in the fat part of the Bell Curve?)
         blueprint = self.get_blueprint()
         blueprint_score = blueprint.log_prob(z_final)
         
         # 3. NLL objective — minimise negative log-likelihood
         loss = -1 * (blueprint_score + total_volume_penalty)
+        
+        # Sanitize any remaining Inf/NaN in the per-sample loss before reducing
+        loss = torch.where(torch.isfinite(loss), loss, torch.full_like(loss, 1e4))
         
         return loss.mean()
 

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Layers, Database, Box, Cpu, Zap, PlayCircle, GitMerge, Network, Settings } from 'lucide-react';
+import { Layers, Database, Box, Cpu, Zap, PlayCircle, GitMerge, Network, Settings, FlaskConical } from 'lucide-react';
 
 import IntroSection from './sections/IntroSection';
 import PreprocessingSection from './sections/PreprocessingSection';
@@ -11,6 +11,7 @@ import TrainerSection from './sections/TrainerSection';
 import HyperparamSection from './sections/HyperparamSection';
 import PipelineOverviewSection from './sections/PipelineOverviewSection';
 import PreprocessingMath from './sections/PreprocessingMath';
+import InferenceLogicSection from './sections/InferenceLogicSection';
 
 
 export default function App() {
@@ -27,6 +28,7 @@ export default function App() {
     { id: 'training', label: 'Training Loop', icon: PlayCircle },
     { id: 'trainer',     label: 'SMPCTrainer',        icon: GitMerge },
     { id: 'hyperparams', label: 'Hyperparameter Ref', icon: Settings },
+    { id: 'inference',   label: 'Inference Logic',    icon: FlaskConical },
   ];
 
   return (
@@ -74,6 +76,7 @@ export default function App() {
             {activeTab === 'training' && <TrainingSection />}
             {activeTab === 'trainer'     && <TrainerSection />}
             {activeTab === 'hyperparams' && <HyperparamSection />}
+            {activeTab === 'inference'   && <InferenceLogicSection />}
           </main>
         </div>
       </div>

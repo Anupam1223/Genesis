@@ -54,7 +54,7 @@ training:
   #   NOT to biases or BatchNorm parameters — that's what makes AdamW different
   #   from L2-penalised Adam). Keeps weights small, discourages memorisation.
   #   Increased to 1e-3 to combat the overfitting observed: train→-15, val→+38.
-  weight_decay: 1.0e-2
+  weight_decay: 1.0e-3
 
   # lr_scheduler_factor ── Multiplicative LR decay applied by ReduceLROnPlateau
   #   when val_loss has not improved for `lr_scheduler_patience` epochs.
@@ -91,7 +91,7 @@ model:
   #   Layers alternate which half they transform (via torch.flip between layers).
   #   More layers = more expressive posterior, but slower forward/backward pass.
   #   Reduced from 6 → 4 to reduce capacity and combat overfitting.
-  num_layers: 4
+  num_layers: 2
 
   # hidden_dim ── Width (number of neurons) of every linear layer inside each
   #   ResidualMLP "brain". All hidden layers share this width.
@@ -112,7 +112,7 @@ model:
   #   the old bound=5.0, meaning the flow was silently doing nothing to them and
   #   the MultivariateNormal was scoring raw z-values of ±7 → catastrophic loss.
   #   bound=9.0 covers 99.9%+ of all samples and eliminates the out-of-bound spikes.
-  bound: 6.0
+  bound: 8.0
 
   # dropout_rate ── Probability of zeroing a neuron's activation during each
   #   ResidualMLP forward pass (only active during training, disabled at eval/sample).
@@ -136,19 +136,16 @@ dataloader:
   #   M4 Max has 14 performance cores. Leaving 2 free for the OS/MPS runtime
   #   and using 12 for data loading achieves near-zero GPU idle time between batches.
   #   Reduce to 4 on machines with fewer cores.
-  num_workers: 12
+  # num_workers=0 — macOS + MPS: PyTorch's shared-memory spawn raises
+  # "Connection refused" when num_workers > 0, crashing the DataLoader.
+  # The dataset is fully pre-loaded into RAM so workers add zero benefit anyway.
+  num_workers: 0
 
-  # prefetch_factor ── How many batches each worker pre-loads into RAM ahead of time.
-  #   prefetch_factor=4 means each of the 12 workers queues up 4 batches, so
-  #   48 batches are always ready. Safe with 128 GB unified memory.
-  #   Reduce to 2 if you see excessive RAM usage during startup.
+  # Ignored when num_workers=0, kept for reference if you switch to Linux/CUDA.
   prefetch_factor: 4
 
-  # persistent_workers ── If true, worker processes stay alive between epochs.
-  #   Without this, Python re-forks 12 processes at the start of every epoch
-  #   (~2s overhead per epoch). With this enabled, workers just block on the
-  #   queue between epochs — no re-spawn cost.
-  persistent_workers: true
+  # Must be false when num_workers=0.
+  persistent_workers: false
 
 
 # -----------------------------------------------------------------------------

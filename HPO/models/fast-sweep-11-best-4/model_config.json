@@ -1,0 +1,1 @@
+{"bound": 5, "dropout_rate": 0.3, "hidden_dim": 256, "mlp_layers": 4, "num_bins": 12, "num_layers": 8, "dim_theta": 12, "dim_condition": 3, "val_loss": 8.79940202361659}

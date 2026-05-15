@@ -51,12 +51,14 @@ def main():
     test_dataset  = SCADAPipelineDataset(data_path=data_cfg['path'], split='test',  log_to_wandb=False)
 
     dataloader_kwargs = {
-        "batch_size":         train_cfg['batch_size'],
-        "num_workers":        dl_cfg['num_workers'],
-        "persistent_workers": dl_cfg['persistent_workers'],
-        "prefetch_factor":    dl_cfg['prefetch_factor'],
-        "pin_memory":         device == "cuda",   # pin_memory not supported on MPS
+        "batch_size":  train_cfg['batch_size'],
+        "num_workers": dl_cfg['num_workers'],
+        "pin_memory":  device == "cuda",   # pin_memory not supported on MPS
     }
+    # prefetch_factor and persistent_workers are only valid when num_workers > 0
+    if dl_cfg['num_workers'] > 0:
+        dataloader_kwargs["prefetch_factor"]    = dl_cfg['prefetch_factor']
+        dataloader_kwargs["persistent_workers"] = dl_cfg['persistent_workers']
 
     train_dataloader = DataLoader(train_dataset, shuffle=True,  **dataloader_kwargs)
     val_dataloader   = DataLoader(val_dataset,   shuffle=False, **dataloader_kwargs)

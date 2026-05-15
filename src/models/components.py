@@ -130,7 +130,9 @@ def rational_quadratic_spline(inputs, unnormalized_widths, unnormalized_heights,
         
         # Calculus: Quotient Rule exact derivative for Volume Penalty
         derivative_numerator = S**2 * (D_1 * xi**2 + 2 * S * xi * (1 - xi) + D_0 * (1 - xi)**2)
-        logabsdet = torch.log(derivative_numerator) - 2 * torch.log(denominator)
+        # Clamp before log: numerical instability with extreme HPO configs (large bound,
+        # high lr) can push these to zero or negative, producing NaN in log.
+        logabsdet = torch.log(derivative_numerator.clamp(min=1e-8)) - 2 * torch.log(denominator.clamp(min=1e-8))
         
         return outputs, logabsdet
     
@@ -156,7 +158,7 @@ def rational_quadratic_spline(inputs, unnormalized_widths, unnormalized_heights,
         # Derivative (Calculated same as forward, but inverted)
         derivative_numerator = S**2 * (D_1 * xi**2 + 2 * S * xi * (1 - xi) + D_0 * (1 - xi)**2)
         denominator = S + (D_1 + D_0 - 2 * S) * xi * (1 - xi)
-        logabsdet = -(torch.log(derivative_numerator) - 2 * torch.log(denominator))
+        logabsdet = -(torch.log(derivative_numerator.clamp(min=1e-8)) - 2 * torch.log(denominator.clamp(min=1e-8)))
         
         return outputs, logabsdet
 
