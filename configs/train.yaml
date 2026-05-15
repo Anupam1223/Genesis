@@ -41,32 +41,32 @@ training:
   #   because the spline knot positions are jointly optimised. 2e-4 is the safe
   #   upper bound; anything above 5e-4 tends to produce NaN knot derivatives.
   #   The scheduler will decay this automatically during training.
-  learning_rate: 5.0e-5
+  learning_rate: 2.0e-5
 
   # grad_clip ── Maximum L2 norm of the gradient vector before it is rescaled.
   #   If the global gradient norm exceeds this value, every parameter's gradient
   #   is scaled down proportionally so the total norm equals grad_clip.
   #   This prevents a single bad batch from blowing up the spline knots.
   #   0.5 is tight — appropriate for a 6-layer, 256-dim model on real sensor data.
-  grad_clip: 1.0
+  grad_clip: 3.0
 
   # weight_decay ── AdamW L2 regularisation coefficient (applied to weights only,
   #   NOT to biases or BatchNorm parameters — that's what makes AdamW different
   #   from L2-penalised Adam). Keeps weights small, discourages memorisation.
   #   Increased to 1e-3 to combat the overfitting observed: train→-15, val→+38.
-  weight_decay: 1.0e-3
+  weight_decay: 5.0e-4
 
   # lr_scheduler_factor ── Multiplicative LR decay applied by ReduceLROnPlateau
   #   when val_loss has not improved for `lr_scheduler_patience` epochs.
   #   factor=0.5 means: new_lr = old_lr × 0.5  (halving).
-  lr_scheduler_factor: 0.5
+  lr_scheduler_factor: 0.8
 
   # lr_scheduler_patience ── How many epochs of no val_loss improvement to
   #   tolerate before triggering a LR reduction.
   #   Reduced to 3: the LR should halve quickly after a plateau so the model
   #   gets a recovery window BEFORE early stopping fires.
   #   Rule: lr_scheduler_patience must always be < early_stopping_patience.
-  lr_scheduler_patience: 3
+  lr_scheduler_patience: 2
 
   # lr_scheduler_min ── Hard floor on the learning rate.
   #   The scheduler will never reduce LR below this value, preventing
@@ -81,7 +81,6 @@ training:
   #   Timeline after a plateau: LR halves at +3, halves again at +6, stop at +15.
   early_stopping_patience: 15
 
-
 # -----------------------------------------------------------------------------
 # MODEL  (Neural Spline Flow — Rational-Quadratic Coupling)
 # -----------------------------------------------------------------------------
@@ -91,7 +90,7 @@ model:
   #   Layers alternate which half they transform (via torch.flip between layers).
   #   More layers = more expressive posterior, but slower forward/backward pass.
   #   Reduced from 6 → 4 to reduce capacity and combat overfitting.
-  num_layers: 2
+  num_layers: 6
 
   # hidden_dim ── Width (number of neurons) of every linear layer inside each
   #   ResidualMLP "brain". All hidden layers share this width.
@@ -118,14 +117,14 @@ model:
   #   ResidualMLP forward pass (only active during training, disabled at eval/sample).
   #   Acts as a regulariser, forcing the MLP to not rely on any single neuron.
   #   Increased from 0.1 → 0.2 to add stronger regularisation against overfitting.
-  dropout_rate: 0.2
+  dropout_rate: 0.3
 
   # mlp_layers ── Depth (number of residual blocks) inside each coupling layer's
   #   ResidualMLP. Each block is: Linear → GELU → Dropout → Linear + skip-connection.
   #   More blocks = the MLP can learn more complex parameter functions, but training
   #   Reduced from 4 → 2 to match the reduced hidden_dim. Two blocks is sufficient
   #   depth for a 3-dim condition → 12-dim spline parameter function.
-  mlp_layers: 2
+  mlp_layers: 3
 
 
 # -----------------------------------------------------------------------------
