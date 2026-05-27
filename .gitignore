@@ -26,6 +26,12 @@ wandb/
 *.pth
 *.onnx
 
+# HPO run artifacts (model checkpoints, sweep results, images)
+HPO/models/
+HPO/results/
+HPO/outputs/
+HPO/HPO/
+
 # IDEs and OS files
 .idea/
 .vscode/
