@@ -68,7 +68,8 @@ def main():
         
     print("📦 Loading test.parquet...")
     test_dataset = SCADAPipelineDataset(data_path=base_cfg['data']['path'], split="test", log_to_wandb=False)
-    test_loader = DataLoader(test_dataset, batch_size=2048, shuffle=False, num_workers=4)
+    # num_workers=0 — macOS MPS shared-memory spawn crashes with workers > 0
+    test_loader = DataLoader(test_dataset, batch_size=2048, shuffle=False, num_workers=0)
 
     for rank, val_loss, run_name, folder in renamed_folders:
         best_model_path = os.path.join(folder, "model_best.pt")
@@ -91,24 +92,21 @@ def main():
             # Remove injected val_loss parameter before building the model
             model_kwargs.pop('val_loss', None)
                 
-            # 2. Build the model specifically for this run's architecture
+            # Build the model specifically for this run's architecture
             model = PipelineConditionalFlow(**model_kwargs)
             ckpt = torch.load(best_model_path, map_location=device, weights_only=False)
             model.load_state_dict(ckpt["model_state_dict"])
             model.to(device)
             model.eval()
             
-            # 3. Call the imported evaluation routines directly!
-            nll, z, theta, cond = ev.compute_nll_and_z(model, test_loader, device)
+            # Call exactly the same panels as scripts/evaluate.py main()
+            nll = ev.compute_nll(model, test_loader, device)
             mean_nll, median_nll = ev.panel_nll_histogram(nll)
-            ev.panel_latent_scatter(z)
-            ev.panel_qq_plots(z)
-            ev.panel_conditional_density(model, test_dataset, device)
             mae = ev.panel_reconstruction_error(model, test_dataset, device)
             ev.panel_coverage_calibration(model, test_dataset, device)
-            ev.panel_nll_heatmap(nll, cond)
-            ev.panel_sample_diversity(model, test_dataset, device)
-
+            ev.panel_marginal_histograms(model, test_dataset, device)
+            ev.panel_pairwise_correlation(model, test_dataset, device)
+            ev.panel_sampled_trajectories(model, test_dataset, device)
             ev.summary_table(mean_nll, median_nll, mae)
             
     print("✅ All HPO models evaluated.")

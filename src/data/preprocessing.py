@@ -17,18 +17,47 @@ def main():
     
     WINDOW_SIZE = 14400   # 4 hours
     DOWNSAMPLE_RATE = 60  # Compress trajectory to 1-minute intervals
-    N_COMPONENTS = 12     # 12 shapes to capture >90% variance
+    N_COMPONENTS = 8      # 8 components sufficient for 3 theta signals (>90% variance)
 
     os.makedirs(os.path.dirname(OUTPUT_PATH), exist_ok=True)
     os.makedirs(CHECKPOINT_DIR, exist_ok=True)
 
-    # 1. DEFINE COLUMNS
-    x_cols = ['COMP_Suction_Pressure', 'COMP_Suction_Drum_Temperature', 'KPI_Fuel_Gas_Lower_Heating_Value']
-    u_cols = ['Turbine_SHAFT_SPEED', 'UK_14PDCV-504_H-SEL', 'SEAL_GAS_SUP_DE']
+# u: Exogenous Inputs & Control Valves (Boundary Conditions)
+    u_cols = [
+        'KPI Fuel Gas Lower Heating Value ',
+        'Part4 UK 1',                   # Likely masks Ambient Temp
+        'UK 14PDCV-504  H-SEL',         # Control Valve
+        'UK V-1412 HPOMR FR E-1411  '   # Control Valve
+    ]
+
+    # x: Observed Process States (Noisy Sensor Space)
+    x_cols = [
+        # Kinetic & Pressure
+        'COMP AXL DSCHRG PRESS',
+        'COMP Discharge Pressure',
+        'COMP Suction Pressure',
+        'Turbine SHAFT SPEED',
+        'COMP Discharge FlowDP',
+        
+        # Thermal Dynamics
+        'COMP Discharge Temp',
+        'COMP Suction Drum Temperature',
+        'TBN TEMP 1 STG FWD INR',
+        'Exhaust Temp Spread 1',
+        
+        # Mechanical & Auxiliary Health
+        'SHAFT BAL PISTON',
+        'LUBE OIL LVL XMTR HI/LO TNK',
+        'DRIVE MOTOR Oil Press',
+        'SEAL GAS SUP DE',
+        'SEAL Primary DE Pressure'
+    ]
+
+    # theta: Latent Thermodynamic Health (Stable KPI Targets)
     theta_cols = [
-        'SEAL_GAS_FLTR_DP', 'LUBE_OIL_LVL_XMTR_HI/LO_TNK', 
-        'KPI_Turbine_Overall_Thermal_Cycle_Efficiency', 'KPI_Gas_COMP_Isentropic_Efficiency', 
-        'COMP_Discharge_Pressure', 'COMP_Discharge_Temp', 'Exhaust_Temp_Spread_1', 'KPI_Turbine_Heat_Rate'
+        'KPI Turbine Overall Thermal Cycle Efficiency', 
+        'KPI Gas COMP Isentropic Efficiency', 
+        'KPI Turbine Heat Rate'
     ]
 
     # 2. LOAD DATA
@@ -43,6 +72,17 @@ def main():
         df = pd.read_parquet(INPUT_PATH)
 
     df.columns = df.columns.str.strip().str.replace(r'\s+', '_', regex=True)
+
+    # Re-derive col lists to match the renamed DataFrame columns
+    # (raw names have spaces/trailing spaces; df.columns now uses underscores)
+    def _to_col(c):
+        import re
+        return re.sub(r'\s+', '_', c.strip())
+
+    x_cols     = [_to_col(c) for c in x_cols]
+    u_cols     = [_to_col(c) for c in u_cols]
+    theta_cols = [_to_col(c) for c in theta_cols]
+
     
     # --- CRITICAL FIX: Drop duplicated columns caused by name cleanup to prevent pd.to_numeric crashes ---
     df = df.loc[:, ~df.columns.duplicated()].copy()

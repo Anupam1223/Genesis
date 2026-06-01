@@ -28,7 +28,7 @@ training:
   #   ReduceLROnPlateau will halve the LR every `lr_scheduler_patience` epochs
   #   with no val improvement, so you can afford to set this higher and let the
   #   scheduler decide when to stop improving.
-  epochs: 60
+  epochs: 100
 
   # batch_size ── Number of samples processed in one forward+backward pass.
   #   Larger batches = smoother gradient estimates but more VRAM per step.
@@ -38,9 +38,10 @@ training:
 
   # learning_rate ── Initial step size for AdamW.
   #   Rational-Quadratic Spline Flows are more sensitive to LR than affine flows
-  #   because the spline knot positions are jointly optimised. 2e-4 is the safe
-  #   upper bound; anything above 5e-4 tends to produce NaN knot derivatives.
-  #   The scheduler will decay this automatically during training.
+  #   because the spline knot positions are jointly optimised.
+  #   CosineAnnealingLR at 2e-4 was tried but caused catastrophic overfitting
+  #   (train -9.7, val +8.9 by epoch 18). Reverted to ReduceLROnPlateau with
+  #   a conservative 2e-5 start — the scheduler decays it safely from here.
   learning_rate: 2.0e-5
 
   # grad_clip ── Maximum L2 norm of the gradient vector before it is rescaled.
@@ -66,7 +67,7 @@ training:
   #   Reduced to 3: the LR should halve quickly after a plateau so the model
   #   gets a recovery window BEFORE early stopping fires.
   #   Rule: lr_scheduler_patience must always be < early_stopping_patience.
-  lr_scheduler_patience: 2
+  lr_scheduler_patience: 3
 
   # lr_scheduler_min ── Hard floor on the learning rate.
   #   The scheduler will never reduce LR below this value, preventing
@@ -90,7 +91,7 @@ model:
   #   Layers alternate which half they transform (via torch.flip between layers).
   #   More layers = more expressive posterior, but slower forward/backward pass.
   #   Reduced from 6 → 4 to reduce capacity and combat overfitting.
-  num_layers: 6
+  num_layers: 5
 
   # hidden_dim ── Width (number of neurons) of every linear layer inside each
   #   ResidualMLP "brain". All hidden layers share this width.
@@ -102,7 +103,7 @@ model:
   #   More bins = smoother, more flexible transformation between [-bound, +bound].
   #   Each bin adds 3 learned parameters per output dimension (width, height, slope).
   #   8 bins is standard; go to 12 for smoother tails if val loss plateaus early.
-  num_bins: 16
+  num_bins: 8
 
   # bound ── The spline is only defined inside [-bound, +bound].
   #   Values outside this range get the identity transform (no change).
@@ -110,21 +111,25 @@ model:
   #   6.6% of train and 7.6% of val samples had at least one coefficient outside
   #   the old bound=5.0, meaning the flow was silently doing nothing to them and
   #   the MultivariateNormal was scoring raw z-values of ±7 → catastrophic loss.
-  #   bound=9.0 covers 99.9%+ of all samples and eliminates the out-of-bound spikes.
-  bound: 8.0
+  #   Max abs PCA coefficient across all splits = 6.49 (measured May 2026).
+  #   bound=7.0 covers 100% of samples with a small safety margin,
+  #   and keeps the spline dense where the data actually lives.
+  #   bound=10.0 was too large — 35% of spline range was empty, diluting gradients
+  #   and causing the flow to expand z norms to ~5-6 instead of converging to ~2.8.
+  bound: 7.0
 
   # dropout_rate ── Probability of zeroing a neuron's activation during each
   #   ResidualMLP forward pass (only active during training, disabled at eval/sample).
   #   Acts as a regulariser, forcing the MLP to not rely on any single neuron.
   #   Increased from 0.1 → 0.2 to add stronger regularisation against overfitting.
-  dropout_rate: 0.3
+  dropout_rate: 0.2
 
   # mlp_layers ── Depth (number of residual blocks) inside each coupling layer's
   #   ResidualMLP. Each block is: Linear → GELU → Dropout → Linear + skip-connection.
   #   More blocks = the MLP can learn more complex parameter functions, but training
   #   Reduced from 4 → 2 to match the reduced hidden_dim. Two blocks is sufficient
-  #   depth for a 3-dim condition → 12-dim spline parameter function.
-  mlp_layers: 3
+  #   depth for a 3-dim condition → 8-dim spline parameter function.
+  mlp_layers: 4
 
 
 # -----------------------------------------------------------------------------

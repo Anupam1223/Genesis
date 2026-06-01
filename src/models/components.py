@@ -2,6 +2,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+# _ACTIVATIONS = {"gelu": nn.GELU, "relu": nn.ReLU, "tanh": nn.Tanh}
+_ACTIVATIONS = {"gelu": nn.GELU}
+
 # ==========================================
 # 1. THE BRAIN: PHYSICS-INFORMED RESIDUAL MLP
 # ==========================================
@@ -10,8 +13,10 @@ class ResidualMLP(nn.Module):
     The 'Brain' of the Coupling Layer.
     Uses GELU for smooth physics gradients and Residual skip connections.
     """
-    def __init__(self, input_dim, hidden_dim, output_dim, num_layers=4, dropout_rate=0.1):
+    def __init__(self, input_dim, hidden_dim, output_dim, num_layers=4, dropout_rate=0.1, activation_fn="gelu"):
         super().__init__()
+        
+        _act_cls = _ACTIVATIONS.get(activation_fn, nn.GELU)
         
         self.initial_layer = nn.Linear(input_dim, hidden_dim)
         
@@ -19,13 +24,13 @@ class ResidualMLP(nn.Module):
         self.blocks = nn.ModuleList([
             nn.Sequential(
                 nn.Linear(hidden_dim, hidden_dim),
-                nn.GELU(),
+                _act_cls(),
                 nn.Dropout(dropout_rate),
                 nn.Linear(hidden_dim, hidden_dim)
             ) for _ in range(num_layers)
         ])
         
-        self.activation = nn.GELU()
+        self.activation = _act_cls()
         self.dropout = nn.Dropout(dropout_rate)
         
         # SLIDE 8: The Output Layer
@@ -172,7 +177,7 @@ class NeuralSplineCouplingLayer(nn.Module):
     Splits the array, runs the MLP, and calls the Math Engine.
     """
     def __init__(self, dim_theta, dim_condition, hidden_dim=128, num_bins=8, bound=5.0,
-                 mlp_layers=4, dropout_rate=0.1):
+                 mlp_layers=4, dropout_rate=0.1, activation_fn="gelu"):
         super().__init__()
         
         self.half_dim = dim_theta // 2
@@ -187,7 +192,8 @@ class NeuralSplineCouplingLayer(nn.Module):
         brain_output_dim = (dim_theta - self.half_dim) * self.params_per_dim
         
         self.brain = ResidualMLP(brain_input_dim, hidden_dim, brain_output_dim,
-                                  num_layers=mlp_layers, dropout_rate=dropout_rate)
+                                  num_layers=mlp_layers, dropout_rate=dropout_rate,
+                                  activation_fn=activation_fn)
 
     def forward(self, theta, condition):
         # 1. THE SPLIT

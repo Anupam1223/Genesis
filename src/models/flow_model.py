@@ -14,7 +14,7 @@ class PipelineConditionalFlow(nn.Module):
     the array swapping between layers, and calculates the final Log-Likelihood Loss.
     """
     def __init__(self, dim_theta, dim_condition, num_layers=6, hidden_dim=128, num_bins=8, bound=5.0,
-                 mlp_layers=4, dropout_rate=0.1):
+                 mlp_layers=4, dropout_rate=0.1, activation_fn="gelu"):
         super().__init__()
         
         self.dim_theta = dim_theta
@@ -36,6 +36,7 @@ class PipelineConditionalFlow(nn.Module):
                 bound=bound,
                 mlp_layers=mlp_layers,
                 dropout_rate=dropout_rate,
+                activation_fn=activation_fn,
             )
             for _ in range(num_layers)
         ])

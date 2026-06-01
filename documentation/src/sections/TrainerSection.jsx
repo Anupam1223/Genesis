@@ -74,10 +74,10 @@ const AnimatedOptimizer = () => {
       color: 'violet',
       icon: <Zap size={16} />,
       params: [
-        { k: 'lr', v: '5e-4', note: 'Passed in from train.py config — lower than typical affine flows' },
-        { k: 'weight_decay', v: '1e-4', note: 'Tightened from default 1e-2. Too high breaks spline knot positioning' },
+        { k: 'lr', v: '2e-5', note: 'Conservative start — ReduceLROnPlateau decays this when val_loss plateaus' },
+        { k: 'weight_decay', v: '5e-4', note: 'Light regularisation. Too high breaks rational-quadratic knot positioning' },
       ],
-      why: 'AdamW decouples weight decay from the gradient update. For spline flows where the rational-quadratic denominator is extremely sensitive to weight magnitude, this prevents unintended knot drift.',
+      why: 'AdamW decouples weight decay from the gradient update. For spline flows where the rational-quadratic denominator is extremely sensitive to weight magnitude, this prevents unintended knot drift. A conservative lr=2e-5 avoids the overfitting seen at higher rates.',
     },
     {
       id: 'scheduler',
@@ -86,11 +86,11 @@ const AnimatedOptimizer = () => {
       icon: <TrendingDown size={16} />,
       params: [
         { k: 'mode',     v: "'min'",  note: 'Watches for val_loss going down' },
-        { k: 'factor',   v: '0.5',   note: 'Halves the LR each time it fires' },
-        { k: 'patience', v: '3',     note: '3 epochs of no improvement before halving' },
+        { k: 'factor',   v: '0.8',   note: 'Multiplies LR by 0.8 each time it fires (gentle decay)' },
+        { k: 'patience', v: '3',     note: '3 epochs of no improvement before decaying' },
         { k: 'min_lr',   v: '1e-6',  note: 'Hard floor — LR never drops below this' },
       ],
-      why: 'Spline flows train with a characteristic jagged loss curve — they can stall for 2–3 epochs before suddenly improving. patience=3 gives the optimiser room to breathe without wasting epochs at a too-high LR.',
+      why: 'CosineAnnealingLR (lr=2e-4) was tried but caused catastrophic overfitting: train loss → −9.7 while val loss shot to +8.9 by epoch 18. The high fixed starting LR bent splines far past the data distribution before val feedback could intervene. ReduceLROnPlateau is safer — it starts conservative and only decays when the model genuinely stalls on unseen data.',
     },
   ];
 
@@ -143,9 +143,9 @@ const AnimatedOptimizer = () => {
         <p className="text-center text-[11px] text-slate-400 leading-relaxed px-2 max-w-lg mx-auto">
           {activeCard
             ? activeCard === 'adamw'
-              ? 'Click ReduceLROnPlateau to see the adaptive scheduling strategy.'
-              : 'Together these two work as a team: AdamW controls step direction, the scheduler controls step magnitude.'
-            : 'Click either card to inspect its parameters. Both are created in __init__ so they persist across all 50 epochs.'}
+              ? 'Click ReduceLROnPlateau to see why it was chosen over CosineAnnealingLR.'
+              : 'Together: AdamW controls step direction; ReduceLROnPlateau acts as a safety valve — only decaying LR when val_loss stalls, preventing premature knot overfitting.'
+            : 'Click either card to inspect its parameters. Both are created in __init__ so they persist across all 100 epochs.'}
         </p>
       </div>
     </div>
@@ -180,19 +180,19 @@ const AnimatedBatchLoop = () => {
       label: 'compute_loss(θ, c)',
       icon: <Activity size={14} />,
       color: 'blue',
-      desc: 'Forward pass: feeds theta + condition through all 6 coupling layers. Returns the negative log-likelihood — how surprised the model is by this batch. No float16 autocast — RQ division would overflow.',
+      desc: 'Forward pass: feeds 8-dim theta + 18-dim condition through all 8 coupling layers. Returns negative log-likelihood (NLL). Wrapped in torch.autocast with bfloat16 when use_bf16=True — bfloat16 is safe for RQ splines because it has float32-range exponents (unlike float16 which underflows the bin-width divisions).',
     },
     {
       label: 'loss.backward()',
       icon: <TrendingDown size={14} />,
       color: 'rose',
-      desc: 'PyTorch automatic differentiation walks the computation graph backwards, computing ∂loss/∂param for every weight in every coupling layer.',
+      desc: 'PyTorch automatic differentiation walks the computation graph backwards, computing ∂loss/∂param for every weight in every coupling layer. Non-finite losses (NaN/Inf) are detected and the batch is skipped to prevent corrupting the optimizer state.',
     },
     {
-      label: 'clip_grad_norm_(0.5)',
+      label: 'clip_grad_norm_(3.0)',
       icon: <Shield size={14} />,
       color: 'amber',
-      desc: 'If the global gradient norm exceeds 0.5, all gradients are scaled down proportionally. Tightened from 1.0 to 0.5 for the larger model (512 dim, 10 layers) — bigger models accumulate larger raw gradients and spline knot extrapolation is extremely sensitive to large gradient steps.',
+      desc: 'If the global gradient norm exceeds 3.0, all gradients are scaled down proportionally. Spline knot extrapolation is extremely sensitive to large gradient steps — clipping prevents a single bad batch from blowing up the rational-quadratic bin widths and derivatives.',
     },
     {
       label: 'optimizer.step()',
@@ -400,21 +400,19 @@ const AnimatedValidation = () => {
 const AnimatedScheduler = () => {
   const [epoch, setEpoch] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
-  const MAX_EPOCH = 30;
+  const [showPostmortem, setShowPostmortem] = useState(false);
+  const MAX_EPOCH = 50;
 
-  // Simulate a jagged val_loss with a plateau then improvement
   const getValLoss = (e) => {
     if (e === 0) return null;
     const base = 1.8 * Math.exp(-0.04 * e) + 0.35;
-    // Plateau between epochs 6–9
     const plateau = (e >= 6 && e <= 9) ? 0.15 : 0;
-    // Another plateau around epoch 18–21
     const plateau2 = (e >= 18 && e <= 21) ? 0.1 : 0;
     return +(base + plateau + plateau2 + (Math.random() * 0.03 - 0.015)).toFixed(4);
   };
 
-  const [history, setHistory] = useState([]); // [{e, loss, lr, fired}]
-  let lr = useRef(5e-4);
+  const [history, setHistory] = useState([]);
+  const lr = useRef(2e-5);
 
   useEffect(() => {
     let int;
@@ -424,23 +422,20 @@ const AnimatedScheduler = () => {
           if (e >= MAX_EPOCH) { setIsPlaying(false); return e; }
           const next = e + 1;
           const loss = getValLoss(next);
-
-          // Simulate patience logic
           setHistory(prev => {
             const recent = prev.slice(-3);
             const stalled = recent.length === 3 && recent.every(r => r.loss >= (prev[prev.length - 4]?.loss ?? Infinity));
-            const fired = stalled;
-            if (fired) lr.current = Math.max(lr.current * 0.5, 1e-6);
-            return [...prev, { e: next, loss, lr: lr.current, fired }];
+            if (stalled) lr.current = Math.max(lr.current * 0.8, 1e-6);
+            return [...prev, { e: next, loss, lr: lr.current, fired: stalled }];
           });
           return next;
         });
-      }, 250);
+      }, 200);
     }
     return () => clearInterval(int);
   }, [isPlaying]);
 
-  const handleReset = () => { setEpoch(0); setHistory([]); lr.current = 5e-4; setIsPlaying(false); };
+  const handleReset = () => { setEpoch(0); setHistory([]); lr.current = 2e-5; setIsPlaying(false); };
 
   const chartH = 80;
   const chartW = 300;
@@ -454,18 +449,30 @@ const AnimatedScheduler = () => {
 
   const lrPoints = history.map((h, i) => {
     const x = (i / (MAX_EPOCH - 1)) * chartW;
-    const y = lrChartH - (Math.log10(h.lr / 1e-6) / Math.log10(5e-4 / 1e-6)) * lrChartH;
+    const y = lrChartH - (Math.log10(h.lr / 1e-6) / Math.log10(2e-5 / 1e-6)) * lrChartH;
     return `${x},${y}`;
   }).join(' ');
 
   const fireEpochs = history.filter(h => h.fired).map(h => h.e);
-  const currentLr = history.length > 0 ? history[history.length - 1].lr : 5e-4;
+  const currentLr = history.length > 0 ? history[history.length - 1].lr : 2e-5;
 
   return (
     <div className="w-full h-full bg-slate-900 flex flex-col">
       <div className="flex-1 overflow-y-auto p-5 flex flex-col gap-4 min-h-0">
         <div className="text-xs text-slate-400 font-mono text-center">
-          ReduceLROnPlateau — Adaptive LR Halving Simulation
+          ReduceLROnPlateau — Adaptive LR Decay Simulation
+        </div>
+
+        {/* Failed experiment callout */}
+        <div className="w-full max-w-md mx-auto bg-rose-950/40 border border-rose-700/60 rounded-xl p-3">
+          <div className="flex items-center gap-2 mb-1.5">
+            <span className="text-rose-400 text-sm">&#9888;</span>
+            <span className="text-[10px] font-bold text-rose-300 uppercase tracking-wider">Experiment: CosineAnnealingLR (lr=2e-4) — Rejected</span>
+          </div>
+          <p className="text-[10px] text-slate-400 leading-relaxed">
+            Tried CosineAnnealingLR with lr_start=2e-4. By epoch 18: train loss → <span className="text-emerald-400 font-mono">−9.7</span>, val loss → <span className="text-rose-400 font-mono">+8.9</span>. 
+            The high fixed starting LR bent splines far outside the data’s support before val feedback could intervene. Early stopping fired at epoch 18.
+          </p>
         </div>
 
         {/* Stats row */}
@@ -482,7 +489,7 @@ const AnimatedScheduler = () => {
           </div>
           <div className="flex flex-col items-center bg-slate-800 border border-slate-700 rounded-xl px-4 py-2">
             <span className="text-[9px] text-slate-500 uppercase mb-0.5">LR</span>
-            <span className={`text-lg font-extrabold font-mono ${currentLr < 5e-4 ? 'text-amber-400' : 'text-emerald-400'}`}>
+            <span className={`text-lg font-extrabold font-mono ${currentLr < 2e-5 ? 'text-amber-400' : 'text-emerald-400'}`}>
               {currentLr.toExponential(0)}
             </span>
           </div>
@@ -491,22 +498,20 @@ const AnimatedScheduler = () => {
         {/* Loss chart */}
         <div className="w-full max-w-md mx-auto bg-slate-800/60 border border-slate-700 rounded-xl p-3">
           <div className="text-[9px] text-slate-500 font-bold uppercase tracking-wider mb-1">Val Loss</div>
-          <div className="overflow-hidden rounded">
-            <svg width="100%" viewBox={`-2 -4 ${chartW + 4} ${chartH + 6}`}>
-              {[0.25, 0.5, 0.75, 1].map(f => (
-                <line key={f} x1="0" y1={chartH * (1-f)} x2={chartW} y2={chartH * (1-f)} stroke="#334155" strokeWidth="0.5" strokeDasharray="3" />
-              ))}
-              {history.length > 1 && <polyline points={lossPoints} fill="none" stroke="#38bdf8" strokeWidth="2" />}
-              {fireEpochs.map(fe => {
-                const x = ((fe - 1) / (MAX_EPOCH - 1)) * chartW;
-                return <line key={fe} x1={x} y1={0} x2={x} y2={chartH} stroke="#f59e0b" strokeWidth="1" strokeDasharray="4" />;
-              })}
-            </svg>
-          </div>
+          <svg width="100%" viewBox={`-2 -4 ${chartW + 4} ${chartH + 6}`}>
+            {[0.25, 0.5, 0.75, 1].map(f => (
+              <line key={f} x1="0" y1={chartH * (1-f)} x2={chartW} y2={chartH * (1-f)} stroke="#334155" strokeWidth="0.5" strokeDasharray="3" />
+            ))}
+            {history.length > 1 && <polyline points={lossPoints} fill="none" stroke="#38bdf8" strokeWidth="2" />}
+            {fireEpochs.map(fe => {
+              const x = ((fe - 1) / (MAX_EPOCH - 1)) * chartW;
+              return <line key={fe} x1={x} y1={0} x2={x} y2={chartH} stroke="#f59e0b" strokeWidth="1" strokeDasharray="4" />;
+            })}
+          </svg>
           {fireEpochs.length > 0 && (
             <div className="flex items-center gap-2 mt-1">
-              <div className="w-4 h-px bg-amber-500 border-dashed border-t border-amber-500"></div>
-              <span className="text-[9px] text-amber-400">LR halved at epochs: {fireEpochs.join(', ')}</span>
+              <div className="w-4 h-px bg-amber-500"></div>
+              <span className="text-[9px] text-amber-400">LR decayed (×0.8) at epochs: {fireEpochs.join(', ')}</span>
             </div>
           )}
         </div>
@@ -514,17 +519,15 @@ const AnimatedScheduler = () => {
         {/* LR chart */}
         <div className="w-full max-w-md mx-auto bg-slate-800/60 border border-slate-700 rounded-xl p-3">
           <div className="text-[9px] text-slate-500 font-bold uppercase tracking-wider mb-1">Learning Rate</div>
-          <div className="overflow-hidden rounded">
-            <svg width="100%" viewBox={`-2 -4 ${chartW + 4} ${lrChartH + 6}`}>
-              {history.length > 1 && <polyline points={lrPoints} fill="none" stroke="#f59e0b" strokeWidth="2" />}
-            </svg>
-          </div>
+          <svg width="100%" viewBox={`-2 -4 ${chartW + 4} ${lrChartH + 6}`}>
+            {history.length > 1 && <polyline points={lrPoints} fill="none" stroke="#f59e0b" strokeWidth="2" />}
+          </svg>
         </div>
 
         <p className="text-center text-[11px] text-slate-400 px-2 max-w-md mx-auto">
-          {epoch === 0 && 'Spline flows often stall for several epochs before improving. ReduceLROnPlateau watches val_loss and halves the LR after 3 stuck epochs.'}
-          {epoch > 0 && epoch < MAX_EPOCH && `Epoch ${epoch}/30 — patience=3 means the scheduler waits 3 full epochs before deciding the model is truly stuck.`}
-          {epoch >= MAX_EPOCH && `Simulation complete. Each amber dashed line marks a LR halving event. The LR floor is 1e-6 — it never goes below that.`}
+          {epoch === 0 && 'Spline flows can stall for 2–3 epochs before improving. patience=3 gives room to breathe before concluding the model is truly stuck.'}
+          {epoch > 0 && epoch < MAX_EPOCH && `Epoch ${epoch}/${MAX_EPOCH} — amber lines mark each LR ×0.8 decay event. LR floor is 1e-6.`}
+          {epoch >= MAX_EPOCH && 'Simulation complete. ReduceLROnPlateau keeps LR at 2e-5 until genuinely stuck — far safer than a high fixed LR.'}
         </p>
       </div>
 
@@ -679,13 +682,15 @@ const AnimatedWalkthrough = () => {
   const codeLines = [
     { text: "class SMPCTrainer:", part: null },
     { text: "  def __init__(self, model, train_dataloader, val_dataloader,", part: 0 },
-    { text: "               learning_rate=2e-4, epochs=50, device='mps', log_to_wandb=False):", part: 0 },
+    { text: "               learning_rate=2e-5, epochs=100, device='mps', ...):", part: 0 },
     { text: "    self.model = model.to(device)", part: 0 },
     { text: "    self.optimizer = AdamW(self.model.parameters(),", part: 0 },
-    { text: "                          lr=learning_rate, weight_decay=1e-4)", part: 0 },
+    { text: "                          lr=learning_rate, weight_decay=5e-4)", part: 0 },
+    { text: "    # ReduceLROnPlateau (CosineAnnealingLR tried + rejected)", part: 0 },
     { text: "    self.scheduler = ReduceLROnPlateau(", part: 0 },
-    { text: "        self.optimizer, mode='min', factor=0.5,", part: 0 },
-    { text: "        patience=3, min_lr=1e-6)", part: 0 },
+    { text: "        self.optimizer, mode='min', factor=0.8, patience=3)", part: 0 },
+    { text: "    perm = torch.randperm(N)[:500]  # random probe", part: 0 },
+    { text: "    self._probe_theta = all_theta[perm]", part: 0 },
     { text: "    self.best_val_loss = float('inf')", part: 0 },
     { text: "", part: null },
     { text: "  def train(self):", part: null },
@@ -699,9 +704,11 @@ const AnimatedWalkthrough = () => {
     { text: "        condition = batch['condition'].to(self.device)", part: 1 },
     { text: "", part: null },
     { text: "        self.optimizer.zero_grad()", part: 1 },
-    { text: "        loss = self.model.compute_loss(theta, condition)  # No float16!", part: 1 },
+    { text: "        with autocast(bfloat16, enabled=use_bf16):  # bfloat16 safe for RQ", part: 1 },
+    { text: "            loss = self.model.compute_loss(theta, condition)", part: 1 },
+    { text: "        if not torch.isfinite(loss): continue  # skip NaN batches", part: 1 },
     { text: "        loss.backward()", part: 1 },
-    { text: "        clip_grad_norm_(self.model.parameters(), max_norm=0.5)", part: 1 },
+    { text: "        clip_grad_norm_(self.model.parameters(), max_norm=3.0)", part: 1 },
     { text: "        self.optimizer.step()", part: 1 },
     { text: "", part: null },
     { text: "        if self.log_to_wandb and global_step % 50 == 0:", part: 1 },
@@ -710,7 +717,7 @@ const AnimatedWalkthrough = () => {
     { text: "", part: null },
     { text: "      avg_val_loss = self.evaluate(epoch, avg_train_loss)", part: 2 },
     { text: "", part: null },
-    { text: "      self.scheduler.step(avg_val_loss)  # ← may halve LR", part: 3 },
+    { text: "      self.scheduler.step(avg_val_loss)  # decay LR if val stalls", part: 3 },
     { text: "      current_lr = self.optimizer.param_groups[0]['lr']", part: 3 },
     { text: "", part: null },
     { text: "      if avg_val_loss < self.best_val_loss:", part: 4 },
@@ -734,23 +741,23 @@ const AnimatedWalkthrough = () => {
   const parts = [
     {
       title: '__init__ — Wiring Everything Up',
-      exp: 'The constructor receives all the assembled pieces from train.py and binds them to self. The model is immediately moved to the target device. AdamW and ReduceLROnPlateau are created here so they persist across all 50 epochs and can accumulate momentum and patience state.',
+      exp: 'The constructor binds all pieces to self. AdamW (lr=2e-5, weight_decay=5e-4) and ReduceLROnPlateau (factor=0.8, patience=3) are created here so they persist across all 100 epochs. CosineAnnealingLR at lr=2e-4 was tested: by epoch 18 train loss was −9.7 and val loss +8.9 (catastrophic overfitting) — rejected. A random 500-sample probe from the full val set is prepared for W&B visualisations.',
     },
     {
       title: 'train() — The Batch Loop',
-      exp: 'For every epoch, for every batch: zero_grad → compute NLL loss (no float16 — spline division overflows) → backward → clip gradients to 1.0 → AdamW step. Batch loss is logged to W&B every 50 global steps to avoid network overhead.',
+      exp: 'For every epoch, for every batch: zero_grad → bfloat16 autocast forward pass (bfloat16 safe for RQ splines; float16 underflows bin-width divisions) → non-finite guard (skip NaN/Inf batches) → backward → clip gradients to 3.0 → AdamW step. Every 50 global steps: batch loss + gradient flow figure logged to W&B.',
     },
     {
       title: 'evaluate() — Validation',
-      exp: 'Called once per epoch after all training batches. model.eval() + torch.no_grad() means no computation graph is built and dropout is disabled. The same compute_loss is called, but gradients are never computed — ~2× memory savings on MPS.',
+      exp: 'Called once per epoch after all training batches. model.eval() + torch.no_grad() means no computation graph is built and dropout is disabled. The same compute_loss is called, but gradients are never computed — ~2× memory savings on MPS unified memory. avg_val_loss is returned to train() for ReduceLROnPlateau and early stopping decisions.',
     },
     {
-      title: 'scheduler.step() — Adaptive LR',
-      exp: 'ReduceLROnPlateau checks if avg_val_loss improved. If not for 3 consecutive epochs (patience=3), the learning rate is multiplied by 0.5. This repeats until the floor of 1e-6 is reached. Splines need this because their loss curves are naturally jagged.',
+      title: 'scheduler.step() — Reactive LR Decay',
+      exp: 'ReduceLROnPlateau.step(avg_val_loss) is called once per epoch. It monitors val_loss and multiplies LR by 0.8 whenever val_loss has not improved for 3 consecutive epochs. This is reactive — the flow only gets less LR when unseen data confirms it is stuck, not on a predetermined schedule. Floor is 1e-6; early stopping (patience=15) halts the run if val_loss stalls too long.',
     },
     {
       title: 'save_checkpoint() — Persistence',
-      exp: 'Two conditions trigger a save: (1) a new best val_loss → overwrites model_best.pt, (2) epoch divisible by 10 → writes model_epoch_N.pt. Both save the full model state, optimizer state, and both losses so training can be resumed or rolled back.',
+      exp: 'Two conditions trigger a save: (1) a new best val_loss → overwrites model_best.pt, (2) epoch divisible by 10 → writes model_epoch_N.pt. Both save full model state, optimizer state, and both losses so training can be resumed. optimizer_state_dict is essential — AdamW momentum buffers take several epochs to warm up; restarting from weights alone wastes those epochs.',
     },
   ];
 
@@ -817,18 +824,18 @@ const steps = [
     id: 'init',
     title: '1. Optimizer & Scheduler',
     icon: Zap,
-    codeSnippet: `self.model = model.to(device)\n\n# AdamW: weight_decay lowered to 1e-4 for splines\n# (too high breaks knot positioning)\nself.optimizer = AdamW(\n    self.model.parameters(),\n    lr=learning_rate,\n    weight_decay=1e-4\n)\n\n# Halves LR when val_loss stalls for 3 epochs\nself.scheduler = ReduceLROnPlateau(\n    self.optimizer,\n    mode='min',\n    factor=0.5,\n    patience=3,\n    min_lr=1e-6\n)\n\nself.best_val_loss = float('inf')`,
-    description: "__init__ wires the model, both data loaders, and all training state into self. AdamW uses weight_decay=1e-4 — much lower than the PyTorch default of 1e-2 — because excessive weight decay destabilises the rational-quadratic spline knot positions. ReduceLROnPlateau is set up immediately so it can accumulate patience state across epochs from the very first one.",
-    why: "Both optimiser and scheduler need to persist across all 50 epochs to accumulate momentum buffers and patience state. Creating them in __init__ (rather than inside train()) guarantees they are never accidentally reset mid-training.",
+    codeSnippet: `self.model = model.to(device)\\n\\n# AdamW: weight_decay=5e-4 (light reg for splines)\\nself.optimizer = AdamW(\\n    self.model.parameters(),\\n    lr=learning_rate,     # 2e-5 (conservative)\\n    weight_decay=weight_decay  # 5e-4\\n)\\n\\n# ReduceLROnPlateau: only decays when val_loss\\n# genuinely plateaus for patience epochs.\\n# CosineAnnealingLR (lr=2e-4) was tried and\\n# rejected: train->-9.7, val->+8.9 by epoch 18.\\nself.scheduler = ReduceLROnPlateau(\\n    self.optimizer,\\n    mode='min',\\n    factor=lr_scheduler_factor,  # 0.8\\n    patience=lr_scheduler_patience,  # 3\\n    min_lr=lr_scheduler_min  # 1e-6\\n)\\n\\n# Probe: 500 RANDOM samples from full val set\\nperm = torch.randperm(N)[:500]\\nself._probe_theta = all_theta[perm]`,
+    description: "__init__ wires the model, both data loaders, and all training state into self. AdamW uses lr=2e-5 (conservative for spline flows) with weight_decay=5e-4. ReduceLROnPlateau watches val_loss and multiplies the LR by 0.8 after 3 epochs of no improvement — safe reactive decay. CosineAnnealingLR at lr=2e-4 was tried but caused catastrophic overfitting (train → -9.7, val → +8.9 by epoch 18) and was rejected.",
+    why: "CosineAnnealingLR was rejected: its high fixed starting LR (2e-4) pushed spline knots far past the data's support before val_loss feedback could intervene. ReduceLROnPlateau starts at a conservative 2e-5 and only decays when the model is genuinely stuck — the val_loss signal acts as a safety valve that prevents the splines from over-shooting the data distribution.",
     Visual: AnimatedOptimizer,
   },
   {
     id: 'batchloop',
     title: '2. Batch Training Loop',
     icon: Activity,
-    codeSnippet: `self.optimizer.zero_grad()\n\n# No torch.autocast float16 — RQ division\n# overflows/underflows in float16 → NaN loss\nloss = self.model.compute_loss(theta, condition)\n\nloss.backward()\n\n# Tightened to 1.0 (was 5.0 for affine flows)\n# Spline knot extrapolation is very grad-sensitive\ntorch.nn.utils.clip_grad_norm_(\n    self.model.parameters(), max_norm=1.0\n)\n\nself.optimizer.step()\n\n# Log every 50 steps to avoid network overhead\nif self.log_to_wandb and global_step % 50 == 0:\n    wandb.log({'train/batch_loss': loss.item()})`,
-    description: "Six substages run for every single batch: clear old gradients → forward pass NLL loss (float32 only — no autocast) → backprop → gradient clipping → AdamW weight update → conditional W&B logging every 50 global steps.",
-    why: "float16 autocast is explicitly avoided: the rational-quadratic spline formula involves divisions between very small numbers (bin widths, derivatives) that easily underflow to zero in float16, causing NaN loss. The grad clip is tightened from 5.0 (affine flows) to 1.0 because spline knots are far more sensitive to large gradient steps than simple shift-scale couplings.",
+    codeSnippet: `self.optimizer.zero_grad()\n\n# bfloat16 autocast when use_bf16=True\n# bfloat16 is safe — float32-range exponents\n# prevent RQ bin-width divisions from underflowing\nwith torch.autocast(device_type=...,\n                    dtype=self.dtype,\n                    enabled=self.use_bf16):\n    loss = self.model.compute_loss(theta, condition)\n\n# Skip batch if NaN/Inf — prevents optimizer corruption\nif not torch.isfinite(loss):\n    self.optimizer.zero_grad(); continue\n\nloss.backward()\n\n# Grad clip = 3.0 (from configs/train.yaml)\ntorch.nn.utils.clip_grad_norm_(\n    self.model.parameters(), max_norm=self.grad_clip\n)\n\nself.optimizer.step()\n\n# W&B: batch loss + gradient flow figure every 50 steps\nif self.log_to_wandb and global_step % 50 == 0:\n    wandb.log({'train/batch_loss': loss.item(),\n               'grad/flow': wandb.Image(fig)})`,
+    description: "Six substages run for every single batch: zero_grad → autocast bfloat16 forward pass (safe for RQ splines; float16 would underflow bin-width divisions) → non-finite guard (skips corrupt batches) → backward → grad clip → AdamW step. Every 50 global steps, both batch loss and a gradient flow figure (per-coupling-layer min/avg/max |grad|) are logged to W&B.",
+    why: "bfloat16 is chosen over float16 because it preserves float32's exponent range — the rational-quadratic spline formula divides very small bin widths and derivatives together, which float16 underflows to zero, causing NaN loss. The grad clip (3.0) prevents a single bad batch from blowing up spline knot positions, while still allowing large enough steps for splines to bend meaningfully.",
     Visual: AnimatedBatchLoop,
   },
   {
@@ -844,9 +851,9 @@ const steps = [
     id: 'scheduler',
     title: '4. LR Scheduling',
     icon: TrendingDown,
-    codeSnippet: `# Called once per epoch, after evaluate()\nself.scheduler.step(avg_val_loss)\ncurrent_lr = self.optimizer.param_groups[0]['lr']\n\n# What fires internally:\n# if epochs_no_improve >= patience (3):\n#     new_lr = max(current_lr * factor (0.5),\n#                  min_lr (1e-6))\n#     optimizer.lr = new_lr`,
-    description: "scheduler.step(avg_val_loss) is called once per epoch. If avg_val_loss has not improved for 3 consecutive epochs (patience=3), the learning rate is multiplied by 0.5. This repeats until the hard floor of 1e-6 is hit.",
-    why: "Spline flows have naturally jagged training curves — they can plateau for 2-3 epochs then suddenly drop. patience=3 gives the model room to breathe before concluding it is stuck. Without this, the LR would decay too aggressively and permanently undershoot the loss minimum.",
+    codeSnippet: `# Called once per epoch, AFTER evaluate()\n# val_loss tells it whether to decay or wait.\nself.scheduler.step(avg_val_loss)\ncurrent_lr = self.optimizer.param_groups[0]['lr']\n\n# What fires internally:\n# patience counter increments each epoch with\n# no improvement. When counter >= patience (3):\n#   new_lr = max(current_lr * factor (0.8),\n#                min_lr (1e-6))\n#   optimizer.lr = new_lr\n#   patience counter resets to 0\n\n# ❌ CosineAnnealingLR (lr=2e-4) was tried:\n#   Epoch 3:  val -9.7 ... Epoch 18: val +8.9\n#   Catastrophic overfitting. Rejected.`,
+    description: "scheduler.step(avg_val_loss) is called once per epoch. ReduceLROnPlateau checks if avg_val_loss improved. If not for 3 consecutive epochs (patience=3), the LR is multiplied by 0.8. This repeats until the floor of 1e-6. CosineAnnealingLR (lr=2e-4) was tested: by epoch 18 train loss was -9.7 and val loss had shot to +8.9 — rejected in favour of this safer reactive approach.",
+    why: "CosineAnnealingLR was rejected: its deterministic high-LR start bent splines far outside the data’s support before the val signal could intervene. ReduceLROnPlateau is reactive — it only decays LR when val_loss stalls, which means the flow gets exactly as much movement as the unseen data allows at each stage. This prevents the training-validation gap from exploding.",
     Visual: AnimatedScheduler,
   },
   {

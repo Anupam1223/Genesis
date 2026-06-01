@@ -19,21 +19,29 @@ class SCADAPipelineDataset(Dataset):
         
         # 1. DEFINE COLUMNS TO EXTRACT
         self.x_cols = [
-            'COMP_Suction_Pressure', 
-            'COMP_Suction_Drum_Temperature', 
-            'KPI_Fuel_Gas_Lower_Heating_Value'
-        ]
-        
-        self.u_cols = [
-            'Turbine_SHAFT_SPEED', 
-            'UK_14PDCV-504_H-SEL', 
-            'SEAL_GAS_SUP_DE'
+            # Kinetic & Pressure
+            'COMP_AXL_DSCHRG_PRESS',
+            'COMP_Discharge_Pressure',
+            'COMP_Suction_Pressure',
+            'Turbine_SHAFT_SPEED',
+            'COMP_Discharge_FlowDP',
+            # Thermal Dynamics
+            'COMP_Discharge_Temp',
+            'COMP_Suction_Drum_Temperature',
+            'TBN_TEMP_1_STG_FWD_INR',
+            'Exhaust_Temp_Spread_1',
+            # Mechanical & Auxiliary Health
+            'SHAFT_BAL_PISTON',
+            'LUBE_OIL_LVL_XMTR_HI/LO_TNK',
+            'DRIVE_MOTOR_Oil_Press',
+            'SEAL_GAS_SUP_DE',
+            'SEAL_Primary_DE_Pressure',
         ]
         
         # theta consists entirely of the pre-computed scenario projection components
-        self.theta_cols = [f'PCA_Coefficient_{i+1}' for i in range(12)]
+        self.theta_cols = [f'PCA_Coefficient_{i+1}' for i in range(8)]
         
-        self.all_required_cols = self.x_cols + self.u_cols + self.theta_cols
+        self.all_required_cols = self.x_cols + self.theta_cols
         
         # 2. FAST LOAD PREPROCESSED PARQUET
         # Construct the target file path based on the split
@@ -59,13 +67,11 @@ class SCADAPipelineDataset(Dataset):
         # Data is already float32 ready, scaled, and clean from the preprocessing script
         raw_theta = df[self.theta_cols].values
         raw_x = df[self.x_cols].values
-        raw_u = df[self.u_cols].values
 
         # Convert to PyTorch Tensors
         # All scaling is handled in preprocessing.py:
-        # x, u → StandardScaler | theta PCA coefficients → StandardScaler (after PCA projection)
+        # x → StandardScaler | theta PCA coefficients → StandardScaler (after PCA projection)
         self.x_tensor = torch.tensor(raw_x, dtype=torch.float32)
-        self.u_tensor = torch.tensor(raw_u, dtype=torch.float32)
         self.theta_tensor = torch.tensor(raw_theta, dtype=torch.float32)
 
         # ARCHITECTURE: condition = x only (measured-now SCADA state)

@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
-import { Layers, Database, Box, Cpu, Zap, PlayCircle, GitMerge, Network, Settings, FlaskConical } from 'lucide-react';
+import { Layers, Database, Cpu, Zap, PlayCircle, GitMerge, Network, Settings, FlaskConical } from 'lucide-react';
 
-import IntroSection from './sections/IntroSection';
 import PreprocessingSection from './sections/PreprocessingSection';
 import DatasetSection from './sections/DatasetSection';
 import ComponentSection from './sections/ComponentSection';
@@ -19,7 +18,6 @@ export default function App() {
 
   const tabs = [
     { id: 'overview', label: 'Pipeline Overview', icon: Network },
-    { id: 'intro', label: 'Introduction', icon: Box },
     { id: 'preprocessing', label: 'Data Preprocessing', icon: Layers },
     { id: 'preprocessing-math', label: 'Preprocessing Math', icon: Layers },
     { id: 'dataset', label: 'Dataset Interface', icon: Database },
@@ -67,7 +65,6 @@ export default function App() {
           {/* Main Content Area */}
           <main className="flex-1 bg-white rounded-2xl shadow-sm border border-slate-200 p-6 md:p-8 min-h-[500px]">
             {activeTab === 'overview' && <PipelineOverviewSection />}
-            {activeTab === 'intro' && <IntroSection />}
             {activeTab === 'preprocessing' && <PreprocessingSection />}
             {activeTab === 'preprocessing-math' && <PreprocessingMath />}
             {activeTab === 'dataset' && <DatasetSection />}

@@ -80,7 +80,7 @@ def main():
         val_dataloader=val_loader,
         device="mps" if torch.backends.mps.is_available() else "cuda",
         log_to_wandb=True,
-        use_bf16=True,
+        use_bf16=False,  # MPS autocast unstable for spline log-det — causes NaN in some configs
         **trainer_kwargs
     )
     
