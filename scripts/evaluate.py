@@ -139,7 +139,7 @@ def panel_reconstruction_error(model, dataset, device, n_samples=2000, n_draws=5
         sample = dataset[int(idx)]
         cond   = sample["condition"].unsqueeze(0).repeat(n_draws, 1).to(device)
         true   = sample["theta"].numpy()
-        draws  = model.sample(num_samples=n_draws, condition=cond).cpu().numpy()
+        draws  = model.sample(condition=cond).cpu().numpy()
         errors[i] = np.abs(draws.mean(axis=0) - true)
     mae = errors.mean(axis=0)
     fig, ax = plt.subplots(figsize=(10, 4))
@@ -175,7 +175,7 @@ def panel_coverage_calibration(model, dataset, device, n_samples=1000, n_draws=1
         sample = dataset[int(idx)]
         cond   = sample["condition"].unsqueeze(0).repeat(n_draws, 1).to(device)
         true   = sample["theta"].numpy()
-        draws  = model.sample(num_samples=n_draws, condition=cond).cpu().numpy()
+        draws  = model.sample(condition=cond).cpu().numpy()
         mu     = draws.mean(axis=0)
         sigma  = draws.std(axis=0) + 1e-8
         for k_i, k in enumerate(sigmas):
@@ -212,7 +212,7 @@ def panel_marginal_histograms(model, dataset, device, n_draws=5000):
     rng  = np.random.default_rng(3)
     idxs = rng.choice(len(dataset), size=n_draws, replace=False)
     conds = torch.stack([dataset[int(i)]["condition"] for i in idxs]).to(device)
-    samples = model.sample(num_samples=n_draws, condition=conds).cpu().numpy()
+    samples = model.sample(condition=conds).cpu().numpy()
 
     fig, axes = plt.subplots(2, 4, figsize=(16, 7))
     axes = axes.flatten()
@@ -258,7 +258,7 @@ def panel_pairwise_correlation(model, dataset, device, n_draws=3000):
     rng  = np.random.default_rng(11)
     idxs = rng.choice(len(dataset), size=n_draws, replace=False)
     conds = torch.stack([dataset[int(i)]["condition"] for i in idxs]).to(device)
-    samples = model.sample(num_samples=n_draws, condition=conds).cpu().numpy()  # (n_draws, 8)
+    samples = model.sample(condition=conds).cpu().numpy()  # (n_draws, 8)
     true_sub = all_true[idxs]                        # same n_draws rows for fair comparison
 
     n_pcs = 8
@@ -343,7 +343,7 @@ def panel_sampled_trajectories(model, dataset, device, n_draws=100, n_windows=3)
         cond     = sample["condition"].unsqueeze(0).repeat(n_draws, 1).to(device)
 
         sampled_pca_scaled = model.sample(
-            num_samples=n_draws, condition=cond
+            condition=cond
         ).cpu().numpy()                                         # (100, 8)
 
         # Decode: scaled PCA coeffs → physical sensor trajectories

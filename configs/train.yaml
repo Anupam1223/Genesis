@@ -49,14 +49,15 @@ training:
   #   is scaled down proportionally so the total norm equals grad_clip.
   #   This prevents a single bad batch from blowing up the spline knots.
   #   0.5 is tight — appropriate for a 6-layer, 256-dim model on real sensor data.
-  grad_clip: 3.0
+  grad_clip: 0.5
 
   # weight_decay ── AdamW L2 regularisation coefficient (applied to weights only,
   #   NOT to biases or BatchNorm parameters — that's what makes AdamW different
   #   from L2-penalised Adam). Keeps weights small, discourages memorisation.
   #   Increased to 1e-3 to combat the overfitting observed: train→-15, val→+38.
-  weight_decay: 5.0e-4
-
+  
+  # weight_decay: 5.0e-4
+  weight_decay: 1.0e-5
   # lr_scheduler_factor ── Multiplicative LR decay applied by ReduceLROnPlateau
   #   when val_loss has not improved for `lr_scheduler_patience` epochs.
   #   factor=0.5 means: new_lr = old_lr × 0.5  (halving).
@@ -80,7 +81,7 @@ training:
   #   This guarantees the LR halves at least TWICE (epochs +3, +6 after plateau)
   #   giving the model two full recovery windows before we give up.
   #   Timeline after a plateau: LR halves at +3, halves again at +6, stop at +15.
-  early_stopping_patience: 15
+  early_stopping_patience: 10
 
 # -----------------------------------------------------------------------------
 # MODEL  (Neural Spline Flow — Rational-Quadratic Coupling)
@@ -130,8 +131,6 @@ model:
   #   Reduced from 4 → 2 to match the reduced hidden_dim. Two blocks is sufficient
   #   depth for a 3-dim condition → 8-dim spline parameter function.
   mlp_layers: 4
-
-
 # -----------------------------------------------------------------------------
 # DATALOADER  (Apple Silicon M4 Max optimised)
 # -----------------------------------------------------------------------------

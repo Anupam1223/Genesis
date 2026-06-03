@@ -96,10 +96,12 @@ class PipelineConditionalFlow(nn.Module):
         
         return loss.mean()
 
-    def sample(self, num_samples, condition):
+    def sample(self, condition):
         """
         INFERENCE / GENERATION PASS: Run instantly on edge hardware to simulate the future.
         Uses the exact Algebraic Quadratic Formula trick to instantly reverse the flow.
+        Generates exactly one future sample per row in `condition`.
+        Output shape: (condition.shape[0], dim_theta)
         """
         batch_size = condition.shape[0]
         

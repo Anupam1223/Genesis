@@ -28,9 +28,9 @@ fi
 
 echo "🎯 Sweep created! Running agent command: $AGENT_CMD"
 
-# 2. Run the agent for 15 trials (you can change this number)
-echo "🏃 Running 15 HPO trials..."
-eval "$AGENT_CMD --count 15"
+# 2. Run the agent for 30 trials (you can change this number)
+echo "🏃 Running 30 HPO trials..."
+eval "$AGENT_CMD --count 30"
 
 # 3. Evaluate the top 5 models remaining
 echo "📊 Evaluating top 5 models..."
